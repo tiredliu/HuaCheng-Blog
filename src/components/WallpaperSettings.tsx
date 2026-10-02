@@ -1,17 +1,48 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Check, ImagePlus, Link2, Loader2, Shuffle, TriangleAlert, Undo2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useRef, useState } from "react";
 import {
+  Check,
+  CloudUpload,
+  ImagePlus,
+  Link2,
+  LoaderCircle,
+  Shuffle,
+  Trash2,
+  TriangleAlert,
+  Undo2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { usePersistentState } from "@/hooks/usePersistentState";
+import {
+  GithubTokenConfig,
+  EMPTY_GITHUB_CONFIG,
+  isGithubConfigured,
+} from "@/components/GithubTokenConfig";
+import {
+  MAX_WALLPAPER_UPLOADS,
   NO_WALLPAPER,
   WALLPAPER_PRESETS,
+  WALLPAPER_UPLOADS_KEY,
+  isWallpaperUploadArray,
+  randomPresetId,
+  sortAndTrimUploads,
+  type WallpaperSettings,
+  type WallpaperUpload,
+} from "@/lib/wallpaper";
+import {
+  GITHUB_CONFIG_KEY,
+  deleteRepoFile,
+  isGithubConfig,
+  uploadImageToRepo,
+  type GithubConfig,
+} from "@/lib/github-upload";
+import {
+  buildUploadFileName,
   canPersistDataUrl,
   compressImageFile,
-  randomPresetId,
-  type WallpaperSettings,
-  type WallpaperSource,
-} from "@/lib/wallpaper";
+  makeThumbnail,
+} from "@/lib/image-utils";
 
 export interface WallpaperSectionProps {
   settings: WallpaperSettings;
@@ -22,22 +53,38 @@ export interface WallpaperSectionProps {
 
 type Feedback = { kind: "error" | "ok"; text: string } | null;
 
-function sameSource(settings: WallpaperSettings, source: WallpaperSource): boolean {
-  return settings.source === source;
-}
-
 /**
  * 壁纸设置。
  *
- * 三种来源：内置预设（纯 CSS，零请求）、外链图片、本地上传（压缩后存 localStorage）。
- * 站点默认值写在 `src/lib/wallpaper.ts` 的 `DEFAULT_WALLPAPER`，
- * 访客在这里做的选择只覆盖自己的浏览器。
+ * 四种来源：内置预设（纯 CSS，零请求）、图片链接、
+ * 直传仓库 `public/uploads/`（不需要后端，见 github-upload.ts）、
+ * 以及只存在本机浏览器的图片。
  */
 export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectionProps) {
   const [urlDraft, setUrlDraft] = useState(settings.url);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "repo" | "local">("");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** 两个上传按钮共用一个 file input，用它记住这次是谁触发的 */
+  const uploadIntent = useRef<"repo" | "local">("repo");
+
+  const [config] = usePersistentState<GithubConfig>(
+    GITHUB_CONFIG_KEY,
+    EMPTY_GITHUB_CONFIG,
+    isGithubConfig,
+  );
+  const [uploads, setUploads] = usePersistentState<WallpaperUpload[]>(
+    WALLPAPER_UPLOADS_KEY,
+    [],
+    isWallpaperUploadArray,
+  );
+
+  const configured = isGithubConfigured(config);
+
+  const activeUploadUrl = useMemo(
+    () => (settings.source === "url" ? settings.url : ""),
+    [settings.source, settings.url],
+  );
 
   const patch = (partial: Partial<WallpaperSettings>) => {
     onChange((prev) => ({ ...prev, ...partial }));
@@ -63,23 +110,77 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
       setFeedback({ kind: "error", text: "地址需要以 http(s):// 、/ 或 data:image/ 开头" });
       return;
     }
-    setFeedback({ kind: "ok", text: "已应用外链图片" });
+    setFeedback({ kind: "ok", text: "已应用这张图片" });
     patch({ source: "url", url });
   };
 
-  const handleFile = async (file: File | undefined) => {
+  /** 直传仓库：这是「无后端上传」的主路径 */
+  const handleRepoUpload = async (file: File | undefined) => {
     if (!file) return;
-    setBusy(true);
+    if (!configured) {
+      setFeedback({
+        kind: "error",
+        text: "请先展开下面的「GitHub Token 配置」填好 token 与仓库信息",
+      });
+      return;
+    }
+
+    setBusy("repo");
     setFeedback(null);
     try {
-      const dataUrl = await compressImageFile(file);
-      if (!canPersistDataUrl(dataUrl)) {
-        throw new Error("浏览器本地存储放不下这张图片，请换一张更小的");
-      }
-      patch({ source: "upload", dataUrl });
+      const [compressed, thumb] = await Promise.all([
+        compressImageFile(file),
+        makeThumbnail(file).catch(() => ""),
+      ]);
+
+      const fileName = buildUploadFileName(file.name);
+      const result = await uploadImageToRepo(config, compressed.blob, fileName);
+
+      const entry: WallpaperUpload = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        url: result.url,
+        path: result.path,
+        name: fileName,
+        size: compressed.size,
+        createdAt: new Date().toISOString(),
+        thumb,
+        fallbackUrl: result.fallbackUrl,
+      };
+
+      setUploads((prev) => sortAndTrimUploads([entry, ...prev]));
+      patch({ source: "url", url: result.url });
+      setUrlDraft(result.url);
       setFeedback({
         kind: "ok",
-        text: `已压缩到约 ${Math.round(dataUrl.length / 1024)}KB 并保存到本机`,
+        text:
+          `已提交到仓库（${Math.round(compressed.size / 1024)}KB）。` +
+          `Cloudflare Pages 重新构建需要 1–2 分钟，期间会先用 GitHub 原始地址显示。`,
+      });
+    } catch (error) {
+      setFeedback({
+        kind: "error",
+        text: error instanceof Error ? error.message : "上传失败，请稍后再试",
+      });
+    } finally {
+      setBusy("");
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  /** 只存本机：不需要任何配置，但换设备就没了 */
+  const handleLocalUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy("local");
+    setFeedback(null);
+    try {
+      const compressed = await compressImageFile(file, { requireDataUrl: true });
+      if (!canPersistDataUrl(compressed.dataUrl)) {
+        throw new Error("浏览器本地存储放不下这张图片，请换一张更小的，或改用「上传到仓库」");
+      }
+      patch({ source: "upload", dataUrl: compressed.dataUrl });
+      setFeedback({
+        kind: "ok",
+        text: `已压缩到约 ${Math.round(compressed.dataUrl.length / 1024)}KB，只保存在本机浏览器`,
       });
     } catch (error) {
       setFeedback({
@@ -87,15 +188,53 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
         text: error instanceof Error ? error.message : "图片处理失败，请换一张试试",
       });
     } finally {
-      setBusy(false);
+      setBusy("");
       if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const removeUpload = async (entry: WallpaperUpload, alsoDeleteFile: boolean) => {
+    if (alsoDeleteFile) {
+      if (!configured) {
+        setFeedback({ kind: "error", text: "要同时删除仓库里的文件，需要先配置 GitHub Token" });
+        return;
+      }
+      const confirmed = window.confirm(
+        `确定要从仓库删除 ${entry.path} 吗？\n这会提交一次 commit，并触发一次重新部署。`,
+      );
+      if (!confirmed) return;
+
+      setBusy("repo");
+      try {
+        await deleteRepoFile(config, entry.path);
+        setFeedback({ kind: "ok", text: `已从仓库删除 ${entry.name}` });
+      } catch (error) {
+        setFeedback({
+          kind: "error",
+          text: error instanceof Error ? error.message : "删除失败",
+        });
+        setBusy("");
+        return;
+      }
+      setBusy("");
+    }
+
+    setUploads((prev) => prev.filter((item) => item.id !== entry.id));
+    if (settings.url === entry.url) {
+      patch({ source: "preset", presetId: "ink", url: "" });
+      setUrlDraft("");
     }
   };
 
   const clearCustom = () => {
     setUrlDraft("");
     setFeedback(null);
-    patch({ source: "preset", presetId: NO_WALLPAPER === settings.presetId ? "ink" : settings.presetId, url: "", dataUrl: "" });
+    patch({
+      source: "preset",
+      presetId: settings.presetId === NO_WALLPAPER ? "ink" : settings.presetId,
+      url: "",
+      dataUrl: "",
+    });
   };
 
   const hasCustom = settings.source !== "preset";
@@ -119,7 +258,7 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
         </button>
       </div>
 
-      {/* 内置壁纸 */}
+      {/* 内置预设 */}
       <div className="grid grid-cols-3 gap-2">
         <Swatch
           label="无"
@@ -139,7 +278,101 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
         ))}
       </div>
 
-      {/* 外链 */}
+      {/* 我的上传：直传仓库的壁纸都在这里选 */}
+      <div className="mt-4">
+        <p className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-stone-500 dark:text-stone-400">
+          <CloudUpload className="h-3 w-3" />
+          我的上传（{uploads.length}/{MAX_WALLPAPER_UPLOADS}）
+        </p>
+
+        {uploads.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-stone-300 px-3 py-3 text-[11px] leading-relaxed text-stone-400 dark:border-stone-700">
+            还没有上传过图片。上传成功后会出现在这里，点一下就切换过去。
+          </p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {uploads.map((entry) => (
+              <UploadSwatch
+                key={entry.id}
+                entry={entry}
+                selected={activeUploadUrl === entry.url}
+                onSelect={() => {
+                  setFeedback(null);
+                  setUrlDraft(entry.url);
+                  patch({ source: "url", url: entry.url });
+                }}
+                onRemove={(alsoDeleteFile) => void removeUpload(entry, alsoDeleteFile)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 上传按钮 */}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            uploadIntent.current = "repo";
+            fileRef.current?.click();
+          }}
+          disabled={busy !== ""}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:border-brand-300 hover:text-brand-600 disabled:opacity-60 dark:border-stone-700 dark:text-stone-300"
+        >
+          {busy ? (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <CloudUpload className="h-3.5 w-3.5" />
+          )}
+          {busy === "repo" ? "上传中…" : "上传到仓库"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            uploadIntent.current = "local";
+            fileRef.current?.click();
+          }}
+          disabled={busy !== ""}
+          title="只保存在本机浏览器，不上传任何服务器"
+          className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-2 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 disabled:opacity-60 dark:border-stone-700 dark:text-stone-400"
+        >
+          <ImagePlus className="h-3.5 w-3.5" />
+          只存本机
+        </button>
+
+        {hasCustom && (
+          <button
+            type="button"
+            onClick={clearCustom}
+            title="清除自定义图片"
+            className="flex shrink-0 items-center rounded-lg border border-stone-200 px-2 py-2 text-xs text-stone-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-stone-700 dark:text-stone-400"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        {/* 两个入口共用一个 file input，靠触发它的按钮区分去向 —— 这里用 ref 上挂的意图 */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            if (uploadIntent.current === "local") void handleLocalUpload(file);
+            else void handleRepoUpload(file);
+          }}
+        />
+      </div>
+
+      <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+        「上传到仓库」会把图片提交到 <code>public/uploads/</code>，任何访客都能看到，
+        适合当站点壁纸；「只存本机」不会上传，只有你自己看得见。
+      </p>
+
+      {/* 图片直链 */}
       <div className="mt-3">
         <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-stone-500 dark:text-stone-400">
           <Link2 className="h-3 w-3" />
@@ -156,7 +389,7 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
             placeholder="https://… 或 /uploads/bg.jpg"
             className={cn(
               "min-w-0 flex-1 rounded-lg border bg-white px-2.5 py-1.5 text-xs text-stone-700 placeholder:text-stone-400 focus:outline-none dark:bg-stone-800 dark:text-stone-200",
-              sameSource(settings, "url")
+              activeUploadUrl
                 ? "border-brand-400 dark:border-brand-600"
                 : "border-stone-200 dark:border-stone-700",
             )}
@@ -169,42 +402,6 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
             应用
           </button>
         </div>
-      </div>
-
-      {/* 上传 */}
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={busy}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors disabled:opacity-60",
-            sameSource(settings, "upload")
-              ? "border-brand-400 text-brand-600 dark:border-brand-600 dark:text-brand-400"
-              : "border-stone-200 text-stone-600 hover:border-brand-300 hover:text-brand-600 dark:border-stone-700 dark:text-stone-300",
-          )}
-        >
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
-          {busy ? "压缩中…" : "上传本地图片"}
-        </button>
-        {hasCustom && (
-          <button
-            type="button"
-            onClick={clearCustom}
-            title="清除自定义图片"
-            className="flex shrink-0 items-center gap-1 rounded-lg border border-stone-200 px-2.5 py-2 text-xs font-medium text-stone-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-stone-700 dark:text-stone-400"
-          >
-            <Undo2 className="h-3.5 w-3.5" />
-            还原
-          </button>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(event) => void handleFile(event.target.files?.[0])}
-        />
       </div>
 
       {feedback && (
@@ -220,6 +417,11 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
           {feedback.text}
         </p>
       )}
+
+{/* GitHub 配置：与「保存为站点默认」共用同一份配置 */}
+<div className="mt-3">
+  <GithubTokenConfig onNotice={(message) => setFeedback({ kind: "ok", text: message })} />
+</div>
 
       {/* 强度 / 模糊 */}
       <div className="mt-4 space-y-3">
@@ -244,12 +446,16 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
       </div>
 
       <p className="mt-2 text-[11px] leading-relaxed text-stone-400">
-        上传的图片只做压缩后存在你自己的浏览器里，不会上传到服务器；外链图片由对方站点提供。
-        强度调到最左等于关闭壁纸。
+        强度调到最左等于关闭壁纸。上传到仓库的图片由 GitHub 保存，
+        会随仓库一起公开；只存本机的图片不会离开这台设备。
       </p>
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* 子组件                                                              */
+/* ------------------------------------------------------------------ */
 
 function Swatch({
   label,
@@ -288,6 +494,86 @@ function Swatch({
         {label}
       </span>
     </button>
+  );
+}
+
+/** 已上传的壁纸：点选切换，右上角按钮可以删（可选是否同时删仓库文件） */
+function UploadSwatch({
+  entry,
+  selected,
+  onSelect,
+  onRemove,
+}: {
+  entry: WallpaperUpload;
+  selected: boolean;
+  onSelect: () => void;
+  onRemove: (alsoDeleteFile: boolean) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onSelect}
+        title={`${entry.name}（${Math.round(entry.size / 1024)}KB）`}
+        aria-pressed={selected}
+        className={cn(
+          "group relative h-14 w-full overflow-hidden rounded-lg border transition-all",
+          selected
+            ? "border-brand-500 ring-2 ring-brand-500/40"
+            : "border-stone-200 hover:border-brand-300 dark:border-stone-700",
+        )}
+      >
+        {entry.thumb ? (
+          <span className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url("${entry.thumb}")` }} />
+        ) : (
+          <span className="absolute inset-0 bg-stone-200 dark:bg-stone-700" />
+        )}
+        <span
+          className={cn(
+            "absolute inset-x-0 bottom-0 truncate bg-black/45 px-1 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm",
+            selected && "bg-brand-600/75",
+          )}
+        >
+          {selected ? "使用中" : entry.name.replace(/\.jpg$/, "")}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setMenuOpen((prev) => !prev)}
+        aria-label="删除这张壁纸"
+        className="absolute -top-1.5 -right-1.5 grid h-5 w-5 place-items-center rounded-full border border-stone-200 bg-white text-stone-400 shadow-sm transition-colors hover:text-brand-600 dark:border-stone-600 dark:bg-stone-800"
+      >
+        <Trash2 className="h-2.5 w-2.5" />
+      </button>
+
+      {menuOpen && (
+        <div className="absolute top-4 right-0 z-10 w-36 overflow-hidden rounded-lg border border-stone-200 bg-white text-[11px] shadow-float dark:border-stone-700 dark:bg-stone-800">
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onRemove(false);
+            }}
+            className="block w-full px-2.5 py-1.5 text-left text-stone-600 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-stone-700"
+          >
+            从列表移除
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onRemove(true);
+            }}
+            className="block w-full px-2.5 py-1.5 text-left text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
+          >
+            同时删除仓库文件
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

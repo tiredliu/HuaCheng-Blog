@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { MusicPlayer } from "@/components/MusicPlayer";
 import { defaultPlaylist } from "@/lib/music";
-import { NAV_ITEMS, SITE } from "@/lib/site";
+import { NAV_ITEMS, SITE, withBasePath } from "@/lib/site";
 import { cn, formatCount, formatDateShort } from "@/lib/utils";
 import type { PostMeta } from "@/lib/posts";
 
@@ -115,9 +115,14 @@ export function Sidebar({
       <div className="flex h-full flex-col" style={{ width: isDesktop ? width : undefined }}>
         {/* 博主信息 */}
         <div className="flex items-start gap-3 px-4 pt-4 pb-3">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white">
-            华
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={withBasePath(SITE.avatarSmall)}
+            alt={SITE.author}
+            width={44}
+            height={44}
+            className="h-11 w-11 shrink-0 rounded-full shadow-sm"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
               {SITE.author}

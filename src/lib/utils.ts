@@ -47,3 +47,16 @@ export function formatCount(value: number): string {
   if (value < 10000) return `${(value / 1000).toFixed(1)}k`;
   return `${(value / 10000).toFixed(1)} 万`;
 }
+
+/**
+ * 字数展示：`862 字` / `1.2k 字` / `1.3 万字`。
+ *
+ * 刻意不用千分位（`1,240 字`）——中文排版里逗号容易和顿号混淆，
+ * 用 k / 万 更符合中文阅读习惯。
+ */
+export function formatWordCount(value: number): string {
+  if (value < 1000) return `${value} 字`;
+  if (value < 10000) return `${(value / 1000).toFixed(1)}k 字`;
+  return `${(value / 10000).toFixed(1)} 万字`;
+}
+

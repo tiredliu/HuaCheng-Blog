@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import GithubSlugger from "github-slugger";
+import type { SearchEntry } from "@/lib/search";
 
 /** 文章目录：与 tina/config.ts 中的 collection path 保持一致 */
 export const POSTS_DIR = path.join(process.cwd(), "content", "posts");
@@ -16,8 +17,14 @@ export interface PostMeta {
   cover?: string;
   author: string;
   draft: boolean;
-  /** 预估阅读时长（分钟） */
-  readingTime: number;
+  /**
+   * 全文字数：中日韩字符按字计，西文按词计。
+   *
+   * 曾经这里放的是「预估阅读时长」，但「约 2 分钟」这种描述既没说清是
+   * 「读多久」还是「写多久」，又隐含了一个拍脑袋的阅读速度假设。
+   * 换成字数之后是**可核对的事实**：打开文章数一数就知道对不对。
+   */
+  wordCount: number;
 }
 
 export interface Post extends PostMeta {
@@ -33,6 +40,7 @@ export interface TocItem {
 
 export { SITE } from "@/lib/site";
 import { SITE } from "@/lib/site";
+import { buildSlugToTagMap, findTagSlugCollisions, tagToSlug } from "@/lib/tag-slug";
 
 /** 把 frontmatter 的任意写法统一成字符串数组 */
 function normalizeTags(value: unknown): string[] {
@@ -59,11 +67,17 @@ function normalizeDate(value: unknown, fallback: number): string {
   return new Date(fallback).toISOString();
 }
 
-/** 中文按字符数、英文按单词数粗略估算阅读时长 */
-function estimateReadingTime(source: string): number {
-  const cjk = (source.match(/[\u4e00-\u9fa5]/g) ?? []).length;
-  const words = (source.replace(/[\u4e00-\u9fa5]/g, " ").match(/[A-Za-z0-9]+/g) ?? []).length;
-  return Math.max(1, Math.round(cjk / 400 + words / 220));
+/**
+ * 统计字数：中日韩字符按「字」计，西文按「词」计。
+ *
+ * 不统计 Markdown 语法符号（`#`、`*`、`|` 等），否则表格多的文章会被明显高估。
+ */
+export function countWords(source: string): number {
+  const plain = toPlainText(source);
+  const cjk = (plain.match(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g) ?? []).length;
+  const words = (plain.replace(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g, " ").match(/[A-Za-z0-9]+/g) ?? [])
+    .length;
+  return cjk + words;
 }
 
 function readPostFile(fileName: string): Post {
@@ -84,22 +98,47 @@ function readPostFile(fileName: string): Post {
     cover: typeof data.cover === "string" ? data.cover : undefined,
     author: typeof data.author === "string" && data.author.trim() ? data.author.trim() : SITE.author,
     draft: data.draft === true,
-    readingTime: estimateReadingTime(content),
+    wordCount: countWords(content),
     source: content,
   };
 }
 
-/** 没有手写 summary 时，用正文首段兜底 */
-function buildSummary(source: string): string {
-  const plain = source
-    .replace(/```[\s\S]*?```/g, " ")
+/**
+ * 把 MDX 正文压成纯文本，供搜索索引与摘要使用。
+ *
+ * 代码块的内容会保留 —— 搜 `useSyncExternalStore` 这类 API 名字时很有用；
+ * 但围栏标记、JSX 标签、Markdown 装饰符都会去掉。
+ */
+export function toPlainText(source: string): string {
+  return source
+    // 代码围栏标记去掉，保留里面的代码
+    .replace(/^\s*(```|~~~)[^\n]*$/gm, " ")
+    // 行内代码保留内容
+    .replace(/`([^`]*)`/g, "$1")
+    // 图片整个丢掉（文件名对搜索没意义）
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    // 链接只留文字
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[#>*`_~-]/g, " ")
-    .replace(/<[^>]+>/g, " ")
+    // MDX / HTML 标签去掉，保留标签之间的文字
+    .replace(/<\/?[A-Za-z][^>]*>/g, " ")
+    // 标题、引用、列表的前缀符号
+    .replace(/^\s{0,3}#{1,6}\s+/gm, " ")
+    .replace(/^\s{0,3}>\s?/gm, " ")
+    .replace(/^\s{0,3}([-*+]|\d+\.)\s+/gm, " ")
+    // 强调、删除线
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/~~(.*?)~~/g, "$1")
+    // 表格分隔行
+    .replace(/^\s*\|?[\s:|-]+\|[\s:|-]*$/gm, " ")
+    .replace(/\|/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
 
+/** 没有手写 summary 时，用正文兜底 */
+function buildSummary(source: string): string {
+  const plain = toPlainText(source.replace(/```[\s\S]*?```/g, " "));
   return plain.length > 96 ? `${plain.slice(0, 96)}…` : plain;
 }
 
@@ -164,14 +203,30 @@ export function getRelatedPosts(slug: string, limit = 3): PostMeta[] {
 
 export interface TagSummary {
   tag: string;
+  /** URL 里用的 ASCII 标识，见 `src/lib/tag-slug.ts` */
+  slug: string;
   count: number;
   latest: string;
 }
 
 export function getAllTags(): TagSummary[] {
+  const posts = getAllPostMeta();
+
+  // slug 撞车会让两个标签指向同一个 URL，必须在构建期就炸掉而不是静默合并
+  const collisions = findTagSlugCollisions(posts.flatMap((post) => post.tags));
+  if (collisions.length > 0) {
+    const detail = collisions
+      .map((item) => `  ${item.slug} ← ${item.tags.join(" / ")}`)
+      .join("\n");
+    throw new Error(
+      `标签 slug 冲突：不同的标签生成了相同的 URL 标识。\n${detail}\n` +
+        `请在 src/lib/tag-slug.ts 的 TAG_SLUG_OVERRIDES 里给其中一个指定不同的 slug。`,
+    );
+  }
+
   const bucket = new Map<string, TagSummary>();
 
-  for (const post of getAllPostMeta()) {
+  for (const post of posts) {
     for (const tag of post.tags) {
       const existing = bucket.get(tag);
       if (existing) {
@@ -180,7 +235,7 @@ export function getAllTags(): TagSummary[] {
           existing.latest = post.date;
         }
       } else {
-        bucket.set(tag, { tag, count: 1, latest: post.date });
+        bucket.set(tag, { tag, slug: tagToSlug(tag), count: 1, latest: post.date });
       }
     }
   }
@@ -188,8 +243,18 @@ export function getAllTags(): TagSummary[] {
   return [...bucket.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "zh-CN"));
 }
 
+/** slug → 原始标签名；找不到返回 undefined */
+export function getTagBySlug(slug: string): string | undefined {
+  return buildSlugToTagMap(getAllPostMeta().flatMap((post) => post.tags)).get(slug);
+}
+
 export function getPostsByTag(tag: string): PostMeta[] {
   return getAllPostMeta().filter((post) => post.tags.includes(tag));
+}
+
+export function getPostsByTagSlug(slug: string): PostMeta[] {
+  const tag = getTagBySlug(slug);
+  return tag ? getPostsByTag(tag) : [];
 }
 
 export interface ArchiveGroup {
@@ -215,11 +280,7 @@ export function getArchive(): ArchiveGroup[] {
 /** 站点统计：文章数、标签数、总字数 */
 export function getSiteStats() {
   const posts = getAllPosts();
-  const words = posts.reduce((total, post) => {
-    const cjk = (post.source.match(/[\u4e00-\u9fa5]/g) ?? []).length;
-    const en = (post.source.replace(/[\u4e00-\u9fa5]/g, " ").match(/[A-Za-z0-9]+/g) ?? []).length;
-    return total + cjk + en;
-  }, 0);
+  const words = posts.reduce((total, post) => total + post.wordCount, 0);
 
   return {
     posts: posts.length,
@@ -263,4 +324,28 @@ export function extractToc(source: string): TocItem[] {
   }
 
   return toc;
+}
+
+/** 单篇文章进入搜索索引的最大正文字数，防止索引文件无限膨胀 */
+const SEARCH_TEXT_LIMIT = 6000;
+
+/**
+ * 生成站内搜索索引（构建期执行）。
+ *
+ * 由 `src/app/search-index.json/route.ts` 输出成 `/search-index.json`，
+ * 浏览器只在首次打开搜索时才下载。
+ */
+export function getSearchIndex(): SearchEntry[] {
+  return getAllPosts().map((post) => {
+    const text = toPlainText(post.source);
+    return {
+      slug: post.slug,
+      title: post.title,
+      summary: post.summary,
+      tags: post.tags,
+      date: post.date,
+      wordCount: post.wordCount,
+      text: text.length > SEARCH_TEXT_LIMIT ? text.slice(0, SEARCH_TEXT_LIMIT) : text,
+    };
+  });
 }

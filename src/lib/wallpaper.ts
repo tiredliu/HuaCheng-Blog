@@ -97,7 +97,7 @@ export function getPreset(id: string): WallpaperPreset | undefined {
 /* 访客设置                                                            */
 /* ------------------------------------------------------------------ */
 
-/** 壁纸来源：内置预设 / 外链图片 / 本地上传 */
+/** 壁纸来源：内置预设 / 图片链接（含直传仓库的图）/ 本机浏览器内的图片 */
 export type WallpaperSource = "preset" | "url" | "upload";
 
 export interface WallpaperSettings {
@@ -106,7 +106,7 @@ export interface WallpaperSettings {
   presetId: string;
   /** source === "url" 时生效，例如 https://... 或 /uploads/bg.jpg */
   url: string;
-  /** source === "upload" 时生效，压缩后的 data URL */
+  /** source === "upload" 时生效，压缩后的 data URL（只存本机） */
   dataUrl: string;
   /** 壁纸强度 0–100，越低越淡（把壁纸推远，保证正文可读） */
   strength: number;
@@ -140,30 +140,91 @@ export function isWallpaperSettings(value: unknown): boolean {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* 直传仓库的壁纸（我的上传）                                          */
+/* ------------------------------------------------------------------ */
+
+export interface WallpaperUpload {
+  id: string;
+  /** 站内路径，例如 /uploads/xxx.jpg */
+  url: string;
+  /** 仓库内路径，例如 public/uploads/xxx.jpg */
+  path: string;
+  name: string;
+  /** 字节数 */
+  size: number;
+  createdAt: string;
+  /** 小缩略图（data URL），用于选择面板，约 10–30KB */
+  thumb: string;
+  /**
+   * 部署完成前的临时地址（GitHub 原始文件）。
+   * Cloudflare 重新构建要 1–2 分钟，这期间站内的 /uploads/xxx 还是 404，
+   * 用它可以立刻看到效果；探测到正式地址可用后会自动清掉。
+   */
+  fallbackUrl?: string;
+}
+
+export const WALLPAPER_UPLOADS_KEY = "hc-blog:wallpaper-uploads";
+
+/** 最多保留多少张上传的壁纸，超出后丢弃最旧的 */
+export const MAX_WALLPAPER_UPLOADS = 12;
+
+export function isWallpaperUploadArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as WallpaperUpload).id === "string" &&
+        typeof (item as WallpaperUpload).url === "string" &&
+        typeof (item as WallpaperUpload).thumb === "string",
+    )
+  );
+}
+
 export interface ResolvedWallpaper {
   /** 直接喂给 style.backgroundImage */
   backgroundImage: string;
   /** 用于 aria-label / 说明文字 */
   label: string;
+  /** 是否用的是临时地址（界面可以提示「等待部署完成」） */
+  pending?: boolean;
 }
 
-/** 把设置解析成可渲染的 background-image；返回 null 表示不显示壁纸 */
+/**
+ * 把设置解析成可渲染的 background-image；返回 null 表示不显示壁纸。
+ *
+ * `fallbackUrl` 只在「刚上传到仓库、站点还没重新构建完」时传入，
+ * 用来顶过那 1–2 分钟的空窗期。
+ */
 export function resolveWallpaper(
   settings: WallpaperSettings,
   isDark: boolean,
+  fallbackUrl?: string,
 ): ResolvedWallpaper | null {
   if (settings.strength <= 8) return null;
 
   if (settings.source === "upload") {
     return settings.dataUrl
-      ? { backgroundImage: `url("${settings.dataUrl}")`, label: "自定义上传图片" }
+      ? { backgroundImage: `url("${settings.dataUrl}")`, label: "本机图片" }
       : null;
   }
 
   if (settings.source === "url") {
     const url = settings.url.trim();
     if (!url) return null;
-    return { backgroundImage: `url("${url.replace(/"/g, "%22")}")`, label: "自定义图片链接" };
+
+    // 刚上传到仓库、还没部署完 → 先用 GitHub 原始地址顶着
+    if (fallbackUrl) {
+      return {
+        backgroundImage: `url("${fallbackUrl.replace(/"/g, "%22")}")`,
+        label: "自定义图片（等待部署）",
+        pending: true,
+      };
+    }
+
+    return { backgroundImage: `url("${url.replace(/"/g, "%22")}")`, label: "自定义图片" };
   }
 
   if (settings.presetId === NO_WALLPAPER) return null;
@@ -176,99 +237,16 @@ export function resolveWallpaper(
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* 本地上传：压缩                                                            */
-/* ------------------------------------------------------------------ */
-
-/** localStorage 一般只有 5MB，转成 base64 还会膨胀约 1/3，所以卡在 2.2MB 字符以内 */
-const MAX_DATA_URL_LENGTH = 2_200_000;
-
-async function loadBitmap(file: File): Promise<ImageBitmap> {
-  if (typeof createImageBitmap === "function") {
-    return createImageBitmap(file);
-  }
-
-  // 很老的浏览器兜底：走 <img> + object URL
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    canvas.getContext("2d")?.drawImage(image, 0, 0);
-    return await createImageBitmap(canvas);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function drawToDataUrl(bitmap: ImageBitmap, maxEdge: number, quality: number): string {
-  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("浏览器不支持 canvas 2d 上下文");
-  context.drawImage(bitmap, 0, 0, width, height);
-
-  return canvas.toDataURL("image/jpeg", quality);
-}
-
-/**
- * 把用户选择的图片压缩成适合放进 localStorage 的 data URL。
- *
- * 逐级降级：1920/0.82 → 1600/0.72 → 1280/0.62，
- * 还是太大就抛错，让界面给出明确提示，而不是静默写入失败。
- */
-export async function compressImageFile(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("请选择图片文件（jpg / png / webp / gif 等）");
-  }
-
-  const bitmap = await loadBitmap(file);
-  try {
-    const attempts: Array<[number, number]> = [
-      [1920, 0.82],
-      [1600, 0.72],
-      [1280, 0.62],
-    ];
-
-    let smallest = "";
-    for (const [maxEdge, quality] of attempts) {
-      const dataUrl = drawToDataUrl(bitmap, maxEdge, quality);
-      smallest = dataUrl;
-      if (dataUrl.length <= MAX_DATA_URL_LENGTH) return dataUrl;
-    }
-
-    throw new Error(
-      `图片压缩后仍有 ${(smallest.length / 1024 / 1024).toFixed(1)}MB，超出浏览器本地存储的容量，请换一张更小的图片`,
-    );
-  } finally {
-    bitmap.close?.();
-  }
-}
-
-/** 探测 localStorage 是否真的放得下这个 data URL */
-export function canPersistDataUrl(dataUrl: string): boolean {
-  const probeKey = "hc-blog:wallpaper-probe";
-  try {
-    window.localStorage.setItem(probeKey, dataUrl);
-    window.localStorage.removeItem(probeKey);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** 随机换一张内置壁纸（不重复当前的） */
 export function randomPresetId(currentId: string): string {
   const pool = WALLPAPER_PRESETS.filter((preset) => preset.id !== currentId);
   const list = pool.length > 0 ? pool : WALLPAPER_PRESETS;
   return list[Math.floor(Math.random() * list.length)].id;
+}
+
+/** 按时间倒序整理上传列表，并裁剪到上限 */
+export function sortAndTrimUploads(uploads: WallpaperUpload[]): WallpaperUpload[] {
+  return [...uploads]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, MAX_WALLPAPER_UPLOADS);
 }

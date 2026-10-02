@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight, Clock, CalendarDays } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, FileText } from "lucide-react";
 import { MdxContent } from "@/components/MdxContent";
+import { PostComments } from "@/components/PostComments";
 import { ReadingProgress } from "@/components/ReadingProgress";
 import { TableOfContents } from "@/components/TableOfContents";
 import { TagBadge } from "@/components/TagBadge";
@@ -14,7 +15,8 @@ import {
   getRelatedPosts,
 } from "@/lib/posts";
 import { SITE } from "@/lib/site";
-import { formatDate, formatDateISO } from "@/lib/utils";
+import { readSiteSettings } from "@/lib/site-settings-file";
+import { formatDate, formatDateISO, formatWordCount } from "@/lib/utils";
 
 /** 只允许预渲染 generateStaticParams 里列出的 slug，其余交给静态托管的 404 */
 export const dynamicParams = false;
@@ -59,6 +61,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const toc = extractToc(post.source);
   const { previous, next } = getAdjacentPosts(slug);
   const related = getRelatedPosts(slug);
+  const siteSettings = readSiteSettings();
 
   return (
     <>
@@ -96,7 +99,8 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
               <time dateTime={formatDateISO(post.date)}>{formatDate(post.date)}</time>
             </span>
             <span className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5" />约 {post.readingTime} 分钟
+              <FileText className="h-3.5 w-3.5" />
+              全文 {formatWordCount(post.wordCount)}
             </span>
             <span>作者：{post.author}</span>
           </div>
@@ -117,6 +121,9 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         <MdxContent>
           <Post />
         </MdxContent>
+
+        {/* 评论：配置了 Giscus 才渲染 */}
+        <PostComments config={siteSettings.giscus} />
 
         {/* 上一篇 / 下一篇 */}
         {(previous || next) && (

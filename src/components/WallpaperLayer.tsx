@@ -5,6 +5,8 @@ import { resolveWallpaper, type WallpaperSettings } from "@/lib/wallpaper";
 export interface WallpaperLayerProps {
   settings: WallpaperSettings;
   isDark: boolean;
+  /** 刚上传到仓库、站点还没重新构建完时，用它顶过空窗期 */
+  fallbackUrl?: string;
 }
 
 /**
@@ -16,8 +18,8 @@ export interface WallpaperLayerProps {
  *
  * 模糊时用 `-inset-10` 把画布撑大，避免边缘出现透明羽化带。
  */
-export function WallpaperLayer({ settings, isDark }: WallpaperLayerProps) {
-  const resolved = resolveWallpaper(settings, isDark);
+export function WallpaperLayer({ settings, isDark, fallbackUrl }: WallpaperLayerProps) {
+  const resolved = resolveWallpaper(settings, isDark, fallbackUrl);
   if (!resolved) return null;
 
   // 强度越低，遮罩越浓 —— 浅色用白、深色用黑，都是「把壁纸推远」

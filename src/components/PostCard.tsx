@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { TagBadge } from "@/components/TagBadge";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, formatWordCount } from "@/lib/utils";
 import type { PostMeta } from "@/lib/posts";
 
 export interface PostCardProps {
@@ -23,7 +23,7 @@ export function PostCard({ post, featured = false, className }: PostCardProps) {
         <div className="mb-2 flex items-center gap-2 text-xs text-stone-400">
           <time dateTime={post.date}>{formatDate(post.date)}</time>
           <span aria-hidden>·</span>
-          <span>约 {post.readingTime} 分钟</span>
+          <span>{formatWordCount(post.wordCount)}</span>
           {featured && (
             <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-600 dark:bg-brand-950/60 dark:text-brand-300">
               最新

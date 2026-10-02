@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, CircleCheck, X } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { SITE } from "@/lib/site";
+import { SITE, withBasePath } from "@/lib/site";
 import { getSiteStats } from "@/lib/posts";
 import { formatCount } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "关于",
-  description: "关于华城博客：技术栈、写作方式与这个站点是怎么跑起来的。",
+  description: "关于花城博客：技术栈、写作方式与这个站点是怎么跑起来的。",
 };
 
 const STACK = [
@@ -19,20 +19,27 @@ const STACK = [
   { layer: "样式", tech: "Tailwind CSS", version: "4", note: "原子化 CSS + 自定义主题" },
   { layer: "内容管理", tech: "TinaCMS", version: "3", note: "网页后台，保存即提交 GitHub" },
   { layer: "内容格式", tech: "MDX", version: "—", note: "Markdown 里嵌 React 组件" },
+  { layer: "代码高亮", tech: "Shiki", version: "4", note: "构建期着色，双主题零运行时" },
+  { layer: "数学公式", tech: "KaTeX", version: "0.19", note: "构建期渲染，字体按需加载" },
+  { layer: "评论", tech: "Giscus", version: "—", note: "基于 GitHub Discussions，可选启用" },
   { layer: "托管", tech: "Cloudflare Pages", version: "—", note: "全球 CDN，国内速度较好" },
   { layer: "视频", tech: "Bilibili iframe", version: "—", note: "国内可直接播放，免流量" },
 ];
 
 const CAPABILITIES = [
-  { name: "文章展示", done: true, note: "首页列表 + 详情页 + 目录" },
+  { name: "文章展示", done: true, note: "首页列表 + 详情页 + 目录 + 上下篇 + 相关文章" },
   { name: "网页后台写作", done: true, note: "TinaCMS 编辑器，保存自动推送 GitHub" },
-  { name: "国内访问速度", done: true, note: "Cloudflare CDN + 无外链字体" },
-  { name: "视频播放", done: true, note: "<BilibiliVideo /> 组件" },
-  { name: "音乐播放", done: true, note: "侧栏 HTML5 播放器 + <AudioPlayer />" },
+  { name: "国内访问速度", done: true, note: "Cloudflare CDN + 无外链字体与外链 JS" },
+  { name: "代码高亮 / 公式", done: true, note: "Shiki 双主题 + KaTeX，都在构建期完成" },
+  { name: "站内搜索", done: true, note: "构建期生成索引，支持按时间排序" },
+  { name: "评论系统", done: true, note: "Giscus（GitHub Discussions），配置即启用" },
+  { name: "视频 / 音乐播放", done: true, note: "<BilibiliVideo /> 与侧栏播放器" },
   { name: "标签 / 归档", done: true, note: "标签页、标签详情、年份归档" },
+  { name: "自定义壁纸", done: true, note: "内置预设 + 直传仓库 + 只存本机" },
+  { name: "站点默认值", done: true, note: "存仓库的 JSON，构建期注入，首屏即生效" },
   { name: "深浅色主题", done: true, note: "跟随系统 + 手动切换，内联脚本防闪屏" },
-  { name: "评论系统", done: false, note: "当前是浏览器本地留言板，可换 Giscus" },
-  { name: "站内搜索", done: false, note: "需接入 Algolia 或 Pagefind" },
+  { name: "图片自动优化", done: false, note: "静态导出下 next/image 优化器不可用，见设计文档" },
+  { name: "阅读量统计", done: false, note: "需要时再加 Cloudflare Workers + D1" },
   { name: "后端 API", done: false, note: "纯静态方案，暂无 Workers + D1" },
 ];
 
@@ -41,11 +48,23 @@ export default function AboutPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="About"
-        title={`关于${SITE.author}`}
-        description={`${SITE.location}的前端工程师。喜欢把复杂的东西拆成可以讲清楚的零件，也喜欢把讲清楚的东西写成文章。`}
-      />
+      <div className="animate-fade-up mb-8 flex items-center gap-5">
+        {/* 头像就是仓库里的 public/avatar.png */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={withBasePath(SITE.avatar)}
+          alt={SITE.author}
+          width={96}
+          height={96}
+          className="h-24 w-24 shrink-0 rounded-2xl shadow-float"
+        />
+        <PageHeader
+          className="mb-0"
+          eyebrow="About"
+          title={`关于${SITE.author}`}
+          description={`${SITE.location}的前端工程师。喜欢把复杂的东西拆成可以讲清楚的零件，也喜欢把讲清楚的东西写成文章。`}
+        />
+      </div>
 
       <section className="animate-fade-up mb-10 rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">
         <h2 className="mb-3 text-base font-semibold text-stone-900 dark:text-stone-100">

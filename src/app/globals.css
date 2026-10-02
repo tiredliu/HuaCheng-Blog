@@ -182,7 +182,12 @@
 }
 
 .article pre {
-  @apply my-6 overflow-x-auto rounded-xl border border-stone-800 bg-stone-900 p-4 font-mono text-[13px] leading-relaxed text-stone-100;
+  @apply my-6 overflow-x-auto rounded-xl border p-4 font-mono text-[13px] leading-relaxed;
+}
+
+/* 没走 Shiki 的 pre（理论上不该出现，因为配了 defaultLanguage）用深色兜底 */
+.article pre:not(.shiki) {
+  @apply border-stone-800 bg-stone-900 text-stone-100;
 }
 
 .article pre code {
@@ -228,3 +233,74 @@
 .article .heading-anchor:focus-visible {
   @apply text-brand-400 opacity-100;
 }
+
+/* ------------------------------------------------------------------ */
+/* 代码高亮（Shiki 双主题）                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * @shikijs/rehype 配了 `defaultColor: false`，所以它不写死颜色，
+ * 只在 <pre> / <span> 上输出两组 CSS 变量：
+ *   --shiki-light / --shiki-light-bg
+ *   --shiki-dark  / --shiki-dark-bg
+ * 下面这几段负责「按当前主题挑一套」，切换深浅色时不需要重新高亮。
+ */
+.article pre.shiki {
+  @apply relative border-stone-200 dark:border-stone-700;
+  background-color: var(--shiki-light-bg);
+}
+
+.article pre.shiki,
+.article pre.shiki span {
+  color: var(--shiki-light);
+}
+
+.dark .article pre.shiki {
+  background-color: var(--shiki-dark-bg);
+}
+
+.dark .article pre.shiki,
+.dark .article pre.shiki span {
+  color: var(--shiki-dark);
+}
+
+/* Shiki 给每行包一个 <span class="line">，用 grid 让它们各占一行 */
+.article pre.shiki code {
+  @apply grid;
+}
+
+/* 语言标签的外层容器（见 mdx-components.tsx 的 MdxPre） */
+.article .code-block {
+  @apply relative my-6;
+}
+
+.article .code-block > pre {
+  @apply my-0;
+}
+
+.article .code-lang {
+  @apply pointer-events-none absolute top-2 right-3 rounded px-1.5 py-0.5 font-mono text-[10px] tracking-wide text-stone-400 uppercase select-none dark:text-stone-500;
+}
+
+/* ------------------------------------------------------------------ */
+/* 数学公式（KaTeX）                                                   */
+/* ------------------------------------------------------------------ */
+
+.article .katex {
+  font-size: 1.05em;
+}
+
+/* 行间公式：独立块，过长时横向滚动，避免撑破布局 */
+.article .katex-display {
+  @apply my-6 overflow-x-auto overflow-y-hidden py-1;
+}
+
+.article .katex-display > .katex {
+  @apply whitespace-nowrap;
+}
+
+/* 公式写错时的提示（rehype-katex 配了 throwOnError: false） */
+.article .katex-error {
+  @apply rounded bg-amber-50 px-1 font-mono text-[0.9em] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300;
+}
+

@@ -1,0 +1,18 @@
+{
+  "$comment": "站点默认设置。可以直接改这个文件，也可以在前台「设置 → 站点默认」里保存（需要 GitHub Token）。访客自己的偏好存在浏览器里，会覆盖这里的值。",
+  "theme": "system",
+  "fontScale": "md",
+  "contentWidth": "comfortable",
+  "sidebarOpen": true,
+  "sidebarWidth": 272,
+  "messageOpen": false,
+  "wallpaper": {
+    "source": "preset",
+    "presetId": "ink",
+    "url": "",
+    "dataUrl": "",
+    "strength": 100,
+    "blur": 0
+  },
+  "giscus": null
+}

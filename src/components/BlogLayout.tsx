@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContentArea } from "./ContentArea";
 import { MessagePanel } from "./MessagePanel";
-import { SettingsPanel, type ContentWidth, type FontScale } from "./SettingsPanel";
+import { SearchDialog } from "./SearchDialog";
+import { SettingsPanel } from "./SettingsPanel";
 import { Sidebar } from "./Sidebar";
+import { ThemeProvider } from "./ThemeContext";
 import { TopBar, type Theme } from "./TopBar";
 import { WallpaperLayer } from "./WallpaperLayer";
 import { useIsDesktop, useMediaQuery } from "@/hooks/useMediaQuery";
@@ -12,24 +14,32 @@ import { isBoolean, isNumber, usePersistentState } from "@/hooks/usePersistentSt
 import { cn } from "@/lib/utils";
 import type { PostMeta } from "@/lib/posts";
 import {
-  DEFAULT_WALLPAPER,
   WALLPAPER_STORAGE_KEY,
+  WALLPAPER_UPLOADS_KEY,
   isWallpaperSettings,
+  isWallpaperUploadArray,
   resolveWallpaper,
   type WallpaperSettings,
+  type WallpaperUpload,
 } from "@/lib/wallpaper";
+import {
+  FONT_SIZES,
+  type ContentWidth,
+  type FontScale,
+  type SiteSettings,
+  type ThemePreference,
+} from "@/lib/site-settings";
+import { probeImageUrl } from "@/lib/image-utils";
 
-const DEFAULT_SIDEBAR_WIDTH = 272;
-const FONT_SIZES: Record<FontScale, string> = { sm: "15px", md: "16px", lg: "17.5px" };
+export type { ContentWidth, FontScale, SiteSettings, ThemePreference } from "@/lib/site-settings";
 
 export interface BlogLayoutProps {
   children: React.ReactNode;
   recentPosts: PostMeta[];
   stats: { posts: number; tags: number; words: number };
+  /** 构建期从 content/site-settings.json 读到的站点默认值 */
+  siteSettings: SiteSettings;
 }
-
-/** 主题偏好：可以明确选浅色 / 深色，也可以交给系统 */
-export type ThemePreference = "system" | "light" | "dark";
 
 const isThemePreference = (value: unknown): boolean =>
   value === "system" || value === "light" || value === "dark";
@@ -40,20 +50,37 @@ const isContentWidth = (value: unknown): boolean => value === "comfortable" || v
  * 应用外壳，对应设计图：
  *
  * ┌──────────────────────────────────────────────┐
- * │ [隐藏]  logo              主题 设置  留言    │  ← TopBar
+ * │ [隐藏]  logo        [🔍 搜索]  留言 主题 设置 │  ← TopBar
  * ├────────────┬───────────────────┬─────────────┤
  * │ 可隐藏导航 │      内容         │ 可隐藏留言区│
  * └────────────┴───────────────────┴─────────────┘
+ *
+ * 状态分两层：
+ * - **站点默认值**来自 `content/site-settings.json`，构建期注入，首屏就是对的
+ * - **访客偏好**存在 localStorage，一旦设过就覆盖站点默认值
  */
-export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
+export function BlogLayout({ children, recentPosts, stats, siteSettings }: BlogLayoutProps) {
   const isDesktop = useIsDesktop();
 
+  // 把站点默认值固定成组件生命周期内的常量：
+  // usePersistentState 的 initialValue 必须是稳定引用，否则会反复重新订阅。
+  // 用 useState 而不是 useRef —— 渲染期读取 ref 会被 react-hooks/refs 拦下。
+  const [defaults] = useState(siteSettings);
+
   // 桌面端：左右两栏是可隐藏的弹性子元素，状态持久化
-  const [sidebarOpen, setSidebarOpen] = usePersistentState("hc-blog:sidebar-open", true, isBoolean);
-  const [messageOpen, setMessageOpen] = usePersistentState("hc-blog:message-open", false, isBoolean);
+  const [sidebarOpen, setSidebarOpen] = usePersistentState(
+    "hc-blog:sidebar-open",
+    defaults.sidebarOpen,
+    isBoolean,
+  );
+  const [messageOpen, setMessageOpen] = usePersistentState(
+    "hc-blog:message-open",
+    defaults.messageOpen,
+    isBoolean,
+  );
   const [sidebarWidth, setSidebarWidth] = usePersistentState(
     "hc-blog:sidebar-width",
-    DEFAULT_SIDEBAR_WIDTH,
+    defaults.sidebarWidth,
     isNumber,
   );
 
@@ -61,32 +88,68 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileMessageOpen, setMobileMessageOpen] = useState(false);
 
-  // 主题偏好：默认交给系统，「首次访问跟随系统」这句话才成立
+  // 主题偏好：站点默认通常是 system，「首次访问跟随系统」这句话才成立
   const [themePreference, setThemePreference] = usePersistentState<ThemePreference>(
     "hc-blog:theme",
-    "system",
+    defaults.theme,
     isThemePreference,
   );
   const systemPrefersDark = useMediaQuery("(prefers-color-scheme: dark)");
   const theme: Theme =
     themePreference === "system" ? (systemPrefersDark ? "dark" : "light") : themePreference;
 
-  const [fontScale, setFontScale] = usePersistentState<FontScale>("hc-blog:font-scale", "md", isFontScale);
+  const [fontScale, setFontScale] = usePersistentState<FontScale>(
+    "hc-blog:font-scale",
+    defaults.fontScale,
+    isFontScale,
+  );
   const [contentWidth, setContentWidth] = usePersistentState<ContentWidth>(
     "hc-blog:content-width",
-    "comfortable",
+    defaults.contentWidth,
     isContentWidth,
   );
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  // 壁纸：站点在 wallpaper.ts 里给一个默认值，访客可以自己换
+  // 壁纸：站点默认值来自 site-settings.json，访客可以自己换
   const [wallpaper, setWallpaper] = usePersistentState<WallpaperSettings>(
     WALLPAPER_STORAGE_KEY,
-    DEFAULT_WALLPAPER,
+    defaults.wallpaper,
     isWallpaperSettings,
   );
-  const wallpaperActive = resolveWallpaper(wallpaper, theme === "dark") !== null;
+
+  // 直传仓库的壁纸列表：刚上传的那张带着 fallbackUrl，
+  // 等站内地址真正可用（部署完成）后再把它清掉
+  const [uploads, setUploads] = usePersistentState<WallpaperUpload[]>(
+    WALLPAPER_UPLOADS_KEY,
+    [],
+    isWallpaperUploadArray,
+  );
+
+  const activeUpload = uploads.find(
+    (item) => wallpaper.source === "url" && item.url === wallpaper.url,
+  );
+
+  // 探测正式地址是否已经部署好；一旦可用就丢掉临时地址
+  useEffect(() => {
+    if (!activeUpload?.fallbackUrl) return;
+    let cancelled = false;
+
+    void probeImageUrl(activeUpload.url).then((ready) => {
+      if (!ready || cancelled) return;
+      setUploads((prev) =>
+        prev.map((item) => (item.id === activeUpload.id ? { ...item, fallbackUrl: undefined } : item)),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUpload?.fallbackUrl, activeUpload?.id, activeUpload?.url, setUploads]);
+
+  const wallpaperActive =
+    resolveWallpaper(wallpaper, theme === "dark", activeUpload?.fallbackUrl) !== null;
 
   // 首帧不写 class：layout.tsx 里的内联脚本已经根据 localStorage / 系统偏好
   // 把 `dark` 加好了，这里再动一次反而会闪一下白屏
@@ -120,15 +183,34 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
     else setMobileMessageOpen((prev) => !prev);
   }, [isDesktop, setMessageOpen]);
 
+  /**
+   * 收起左右两栏。
+   *
+   * 桌面端和移动端各有一套状态（桌面端持久化、移动端是一次性的抽屉），
+   * 所以「关闭」必须按当前断点分派 —— 否则就会出现
+   * 「面板明明开着，点 X 却没反应」这种 bug。
+   */
+  const closeSidebar = useCallback(() => {
+    if (isDesktop) setSidebarOpen(false);
+    else setMobileNavOpen(false);
+  }, [isDesktop, setSidebarOpen]);
+
+  const closeMessage = useCallback(() => {
+    if (isDesktop) setMessageOpen(false);
+    else setMobileMessageOpen(false);
+  }, [isDesktop, setMessageOpen]);
+
+  /** 把访客偏好清掉，回到仓库里配置的站点默认值 */
   const resetLayout = useCallback(() => {
-    setSidebarOpen(true);
-    setMessageOpen(false);
-    setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-    setThemePreference("system");
-    setFontScale("md");
-    setContentWidth("comfortable");
-    setWallpaper(DEFAULT_WALLPAPER);
+    setSidebarOpen(defaults.sidebarOpen);
+    setMessageOpen(defaults.messageOpen);
+    setSidebarWidth(defaults.sidebarWidth);
+    setThemePreference(defaults.theme);
+    setFontScale(defaults.fontScale);
+    setContentWidth(defaults.contentWidth);
+    setWallpaper(defaults.wallpaper);
   }, [
+    defaults,
     setContentWidth,
     setFontScale,
     setMessageOpen,
@@ -138,31 +220,76 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
     setWallpaper,
   ]);
 
+  /** 把当前这组设置整理成 SiteSettings，供「保存为站点默认」使用 */
+  const currentSettings = useMemo<SiteSettings>(
+    () => ({
+      theme: themePreference,
+      fontScale,
+      contentWidth,
+      sidebarOpen,
+      sidebarWidth,
+      messageOpen,
+      wallpaper,
+      giscus: defaults.giscus,
+    }),
+    [
+      contentWidth,
+      defaults.giscus,
+      fontScale,
+      messageOpen,
+      sidebarOpen,
+      sidebarWidth,
+      themePreference,
+      wallpaper,
+    ],
+  );
+
   const effectiveSidebarOpen = isDesktop ? sidebarOpen : mobileNavOpen;
   const effectiveMessageOpen = isDesktop ? messageOpen : mobileMessageOpen;
 
-  // Esc 关闭最上层的浮层
-  useEffect(() => {
-    if (!settingsOpen && !effectiveSidebarOpen && !effectiveMessageOpen) return;
+  // 深层组件（文章底部的评论）需要知道最终生效的主题
+  const themeState = useMemo(() => ({ theme, isDark: theme === "dark" }), [theme]);
 
+  // Esc 关闭最上层的浮层；⌘K / Ctrl+K 打开搜索
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // ⌘K / Ctrl+K：搜索是全局快捷键，任何状态下都能唤起
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen((prev) => !prev);
+        return;
+      }
+
       if (event.key !== "Escape") return;
-      if (settingsOpen) setSettingsOpen(false);
-      else if (!isDesktop && effectiveSidebarOpen) setMobileNavOpen(false);
-      else if (!isDesktop && effectiveMessageOpen) setMobileMessageOpen(false);
+      if (searchOpen) setSearchOpen(false);
+      else if (settingsOpen) setSettingsOpen(false);
+      else if (effectiveSidebarOpen) closeSidebar();
+      else if (effectiveMessageOpen) closeMessage();
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isDesktop, settingsOpen, effectiveSidebarOpen, effectiveMessageOpen]);
+  }, [
+    closeMessage,
+    closeSidebar,
+    settingsOpen,
+    searchOpen,
+    effectiveSidebarOpen,
+    effectiveMessageOpen,
+  ]);
 
   return (
     // isolate 会建立新的层叠上下文，壁纸层的 -z-10 才能「盖住底色、但不压住内容」
+    <ThemeProvider value={themeState}>
     <div
       className="relative isolate h-dvh bg-stone-100 p-0 sm:p-3 dark:bg-stone-950"
       data-wallpaper={wallpaperActive ? "on" : "off"}
     >
-      <WallpaperLayer settings={wallpaper} isDark={theme === "dark"} />
+      <WallpaperLayer
+        settings={wallpaper}
+        isDark={theme === "dark"}
+        fallbackUrl={activeUpload?.fallbackUrl}
+      />
 
       <a
         href="#content"
@@ -188,6 +315,7 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
           messageOpen={effectiveMessageOpen}
           onToggleMessage={toggleMessage}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSearch={() => setSearchOpen(true)}
           frosted={wallpaperActive}
         />
 
@@ -196,7 +324,7 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
             isOpen={effectiveSidebarOpen}
             width={sidebarWidth}
             onWidthChange={setSidebarWidth}
-            onClose={() => setMobileNavOpen(false)}
+            onClose={closeSidebar}
             recentPosts={recentPosts}
             stats={stats}
             isDesktop={isDesktop}
@@ -209,12 +337,14 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
 
           <MessagePanel
             isOpen={effectiveMessageOpen}
-            onClose={() => setMobileMessageOpen(false)}
+            onClose={closeMessage}
             isDesktop={isDesktop}
             frosted={wallpaperActive}
           />
         </div>
       </div>
+
+      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       <SettingsPanel
         isOpen={settingsOpen}
@@ -230,9 +360,12 @@ export function BlogLayout({ children, recentPosts, stats }: BlogLayoutProps) {
         wallpaper={wallpaper}
         onWallpaperChange={setWallpaper}
         isDark={theme === "dark"}
+        siteSettings={defaults}
+        currentSettings={currentSettings}
         onReset={resetLayout}
       />
     </div>
+    </ThemeProvider>
   );
 }
 
