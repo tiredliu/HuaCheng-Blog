@@ -1,0 +1,123 @@
+---
+title: Tailwind CSS 4 换了套配置方式
+date: 2025-03-08
+tags: [Tailwind, CSS, 主题]
+summary: v4 把配置从 tailwind.config.js 搬进了 CSS 本身。这件事的意义比「少一个文件」大得多。
+author: 华城
+---
+
+## 从 JS 回到 CSS
+
+Tailwind v3 的项目根目录长这样：
+
+```text
+tailwind.config.js   ← 主题、插件、content 扫描路径
+postcss.config.js
+app/globals.css      ← @tailwind base; @tailwind components; @tailwind utilities;
+```
+
+v4 之后只剩一个文件：
+
+```css filename="src/app/globals.css"
+@import "tailwindcss";
+
+@theme {
+  --color-brand-500: #e4513a;
+  --font-sans: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+```
+
+三个 `@tailwind` 指令合并成了 `@import "tailwindcss"`，
+而所有的主题变量变成了标准的 CSS 自定义属性，写在 `@theme` 里。
+
+<Callout type="tip" title="为什么这是个进步">
+因为主题值现在真的是 CSS 变量。你可以在浏览器的开发者工具里看到它们、
+可以在运行时改、可以让 JS 读到——而不像以前那样，只是构建期的一个字符串替换。
+</Callout>
+
+## 一个颜色，一整套色阶
+
+定义 `--color-brand-500` 之后，Tailwind 会自动生成 `bg-brand-500`、
+`text-brand-500`、`border-brand-500`、`ring-brand-500` 等等。
+色阶命名和内置颜色完全一致：
+
+```css
+@theme {
+  --color-brand-50: #fff2ef;
+  --color-brand-100: #ffe1da;
+  --color-brand-200: #ffc5b8;
+  --color-brand-300: #fb9e8a;
+  --color-brand-400: #f2715a;
+  --color-brand-500: #e4513a;
+  --color-brand-600: #cb3823;
+}
+```
+
+这个站点的 `brand` 是木棉红——广州的市花。选一个和自己有关系的颜色，
+比从调色板里随便挑一个更容易坚持下去。
+
+## 深色模式不再依赖 config
+
+v3 里要先在 config 里写 `darkMode: "class"`。v4 用一条指令代替：
+
+```css
+@custom-variant dark (&:where(.dark, .dark *));
+```
+
+这行的意思是：当元素本身有 `.dark`，或者它在某个 `.dark` 祖先里面时，
+`dark:` 前缀的样式就生效。
+
+```html
+<html class="dark">
+  <body>
+    <!-- 这里的 dark:bg-stone-900 会生效 -->
+  </body>
+</html>
+```
+
+<Callout type="warning" title="闪烁问题要自己解决">
+类名挂上去的时机决定了会不会闪白屏。
+如果只靠 React 的 `useEffect` 去加 `.dark`，那么首帧一定是浅色的。
+唯一的办法是在 `<head>` 里塞一段同步执行的内联脚本，
+在浏览器绘制之前就把类名改好。
+</Callout>
+
+## 自定义工具类
+
+v4 用 `@utility` 定义自己的工具类：
+
+```css
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+```
+
+写完之后 `no-scrollbar` 就能像内置类一样用，而且支持变体（`md:no-scrollbar`）。
+
+## 我踩到的一个坑
+
+`.article a` 这类「作用域内的元素选择器」和工具类的优先级关系需要留意：
+
+```css
+.article a { text-decoration: underline; }   /* 0-1-1 */
+```
+
+这时候在元素上加 `no-underline`（0-1-0）是**压不过**它的，
+得用 `!no-underline` 或者把选择器写成 `.article .heading-anchor`（0-2-0）。
+
+我一开始就是在这里卡了十分钟——标题旁边的 `#` 锚点死活去不掉下划线。
+
+## 值得迁移吗
+
+如果你正在新起项目，直接用 v4，没有理由从 v3 开始。
+
+如果是老项目，迁移的主要工作量在于：
+
+1. `@tailwind` 三条指令换成 `@import "tailwindcss"`
+2. `tailwind.config.js` 里的 `theme.extend` 搬进 `@theme`，命名规则从驼峰改成短横线
+3. 检查有没有用到被移除的类名（比如 `bg-opacity-*` 这类，现在统一用 `bg-black/50` 的斜杠语法）
+
+第三条是最容易漏的。建议先跑一遍构建，Tailwind 会明确报出哪些类名已经不存在了。

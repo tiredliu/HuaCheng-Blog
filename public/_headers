@@ -1,0 +1,28 @@
+# Cloudflare Pages 的响应头配置。
+# 说明：https://developers.cloudflare.com/pages/configuration/headers/
+#
+# 语法是「一行路径 + 缩进的 Header: 值」。
+# ⚠️ 一个请求匹配到多条规则时，同名 Header 会用逗号拼接，而不是后者覆盖前者。
+#    所以每类资源只允许命中一条含 Cache-Control 的规则，避免出现
+#    `max-age=0, max-age=31536000` 这种自相矛盾的值。
+
+# 带内容哈希的构建产物：文件内容变了文件名也会变，可以永久缓存
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 上传的图片/音频：文件名不变，缓存短一些，方便随时替换
+/uploads/*
+  Cache-Control: public, max-age=86400
+
+# 订阅源：内容会更新，交给 ETag 校验
+/rss.xml
+  Cache-Control: public, max-age=0, must-revalidate
+  Content-Type: application/rss+xml; charset=utf-8
+
+# 兜底规则：只放安全头，不放 Cache-Control
+# （否则会和上面几条拼在一起）
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: SAMEORIGIN
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

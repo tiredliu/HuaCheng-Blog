@@ -1,0 +1,31 @@
+node_modules
+.next
+out
+build
+coverage
+
+# TinaCMS 生成物与编译临时目录
+tina/__generated__
+public/admin
+.tina-tmp
+
+# 版本控制与本地环境
+.git
+.gitignore
+.github
+.env*
+!.env.example
+
+# 设计稿与文档，不需要进镜像
+image
+design.md
+README.md
+AGENTS.md
+CLAUDE.md
+
+# 编辑器与系统垃圾
+.vscode
+.idea
+.DS_Store
+*.log
+*.tsbuildinfo

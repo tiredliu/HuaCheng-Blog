@@ -1,0 +1,129 @@
+---
+title: MDX 实战：让 Markdown 会写代码
+date: 2025-04-11
+tags: [MDX, React, 内容工程]
+summary: MDX 不是「更强的 Markdown」，而是「Markdown 语法糖包着的 JSX」。理解这一点之后，很多写法就顺了。
+author: 华城
+---
+
+## Markdown 的天花板
+
+普通 Markdown 能表达的东西是固定的：标题、段落、列表、代码块、表格。
+一旦你想插入一个「带样式的提示框」，就只能手写 HTML：
+
+```html
+<div class="callout callout--tip">
+  <strong>提示</strong>
+  <p>这段样式还得在 CSS 里单独写一遍。</p>
+</div>
+```
+
+内容里混进了表现层，而且这堆 class 名没有类型检查，改样式的时候心里没底。
+
+## MDX 的解法
+
+MDX 的思路是：**把 Markdown 直接编译成 React 组件树**。
+于是你可以在文档里光明正大地写 JSX：
+
+```mdx
+<Callout type="tip" title="小技巧">
+  这里可以写任何 React 能写的东西。
+</Callout>
+```
+
+关键在于，`Callout` 是一个真正的 React 组件——它有 prop 类型、有样式封装、
+可以被单独测试。内容里只留下「这是一个提示框」这个语义。
+
+## 组件注册的两种方式
+
+第一种是**显式导入**，适合只在某一篇文章里用到的组件：
+
+```mdx
+import Chart from "@/components/Chart";
+
+<Chart data={[1, 2, 3]} />
+```
+
+第二种是**全局注册**，适合全站通用的组件。Next.js 的约定是在项目根目录
+放一个 `mdx-components.tsx`：
+
+```tsx filename="src/mdx-components.tsx"
+import type { MDXComponents } from "mdx/types";
+
+const components: MDXComponents = {
+  h2: CustomH2,
+  a: ExternalAwareLink,
+  Callout,
+  BilibiliVideo,
+};
+
+export function useMDXComponents(): MDXComponents {
+  return components;
+}
+```
+
+注册过的组件在 MDX 里直接写标签名就行，不用 import。
+
+<Callout type="info" title="注意签名">
+不同版本的 Next.js 里 `useMDXComponents` 的签名不一样。
+这个项目用的是 Next.js 16，它**不接受任何参数**，直接返回组件表即可。
+</Callout>
+
+## 一个真实的例子：给标题加锚点
+
+我想让每个 `h2` 悬停时出现一个 `#`，点一下就能拿到这一节的链接。
+实现方式是在 `mdx-components.tsx` 里覆盖 `h2`：
+
+```tsx
+function createHeading(level: 2 | 3) {
+  const Tag = `h${level}` as const;
+  return function Heading({ id, children }: { id?: string; children?: ReactNode }) {
+    return (
+      <Tag id={id}>
+        {children}
+        {id && <a href={`#${id}`} className="heading-anchor">#</a>}
+      </Tag>
+    );
+  };
+}
+```
+
+那个 `id` 是从哪来的？是 `rehype-slug` 在编译时按 GitHub 的规则算出来加上的。
+只要目录（TOC）用的是同一个算法，两边就永远对得上。
+
+<Callout type="warning" title="别自己手写 slug 函数">
+中文标题的 slug 规则很容易写歪：标点怎么处理、重复标题怎么去重（`-1` 还是 `-2`）。
+直接用 `github-slugger` 这个包，和 `rehype-slug` 内部用的是同一份实现。
+</Callout>
+
+## 表格与任务列表
+
+`remark-gfm` 让 MDX 支持 GitHub 风格扩展。表格：
+
+| 语法 | 渲染结果 |
+| --- | --- |
+| `**粗体**` | **粗体** |
+| `` `代码` `` | `代码` |
+| `~~删除~~` | ~~删除~~ |
+
+任务列表也直接可以用：
+
+- [x] 接入 MDX 编译
+- [x] 支持 GFM 扩展
+- [x] 标题自动加 id 与锚点
+- [ ] 代码块语法高亮
+- [ ] 数学公式（KaTeX）
+
+最后两项还没做。语法高亮要引入 Shiki，会给构建增加几秒，
+我还在犹豫这点开销值不值得——毕竟大部分代码块只是几行配置文件。
+
+## 内容即代码
+
+用了一段时间之后，我越来越觉得 MDX 最重要的不是「能写 JSX」，
+而是它让**内容也进入了工程化的流程**：
+
+- 组件的类型检查覆盖了文档里的用法
+- 同一套设计系统可以同时服务页面和文档
+- 内容可以在构建期被解析、校验、生成索引
+
+换句话说，文章不再是一坨字符串，而是应用的一部分。

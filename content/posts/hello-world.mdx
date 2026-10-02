@@ -1,0 +1,136 @@
+---
+title: 你好，世界：这个博客是怎么搭起来的
+date: 2025-06-18
+tags: [Next.js, MDX, Cloudflare]
+summary: 从毛坯房到能住人——记录一次用 Next.js 静态导出 + TinaCMS + Cloudflare Pages 搭个人博客的完整过程，以及为什么最后选了纯静态。
+author: 华城
+---
+
+## 为什么又开一个博客
+
+写作这件事，我断断续续试过好几次。前面几次都死在同一件事上：**发布太麻烦**。
+
+Markdown 写完了还要 `git add`、`commit`、`push`，然后等 CI 跑完。兴致来的时候这不算什么，
+但更多时候我只是想改一个错别字——为了改错别字走一遍完整的部署流程，热情就消磨掉了。
+
+所以这次的目标很明确，一共四条：
+
+- 网页后台直接写作，手机上也能改
+- 国内访问要快
+- 托管必须免费
+- 源码可以公开
+
+<p>这四条其实互相打架。网页后台意味着要有服务端，服务端就意味着不能纯静态、不能白嫖 CDN。
+转折点是 TinaCMS：它把「后台」做成了纯前端应用，编辑时直接调 GitHub API 提交，
+不需要我维护任何服务器。</p>
+
+## 技术选型
+
+最后定下来的组合是这样：
+
+| 层级 | 技术 | 作用 |
+| --- | --- | --- |
+| 框架 | Next.js 16 | App Router + 静态导出 |
+| UI | React 19 | 组件化开发 |
+| 样式 | Tailwind CSS 4 | 原子化 CSS |
+| 内容 | MDX | Markdown 里嵌 React 组件 |
+| 后台 | TinaCMS | 网页编辑器，保存即提交 GitHub |
+| 托管 | Cloudflare Pages | 全球 CDN，国内速度尚可 |
+
+<Callout type="tip" title="为什么不是 Vercel">
+Vercel 的体验确实好，但它的默认域名和部分 CDN 节点在国内访问不稳定。
+Cloudflare Pages 免费额度更大，国内实测也更稳一些。
+代价是构建产物必须是纯静态的，不能用 Server Actions、ISR 这些东西。
+</Callout>
+
+## 静态导出到底做了什么
+
+`next build` 执行的时候，Next.js 会把每个路由都渲染成一份 HTML 文件。
+
+```ts filename="next.config.ts"
+import createMDX from "@next/mdx";
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  output: "export",        // 关键：生成静态 HTML
+  images: { unoptimized: true },  // 静态导出必须关掉默认图片优化
+  trailingSlash: true,     // 生成 posts/hello-world/index.html
+};
+
+export default createMDX({ options: { remarkPlugins: ["remark-gfm"] } })(nextConfig);
+```
+
+构建完之后，`out/` 目录里就是一棵可以直接扔给任何静态服务器的文件树：
+
+```text
+out/
+├── index.html
+├── posts/
+│   ├── index.html
+│   └── hello-world/
+│       └── index.html
+└── _next/static/…
+```
+
+访客打开页面时，服务器（其实是 CDN 边缘节点）只是把已经生成好的文件发出去，
+**不执行任何代码、不查任何数据库**。这就是它快的原因，也是它便宜的原因。
+
+<Callout type="warning" title="静态导出的边界">
+一旦选了 `output: "export"`，下面这些能力就用不了了：
+Server Actions、请求相关的 Route Handler、`cookies()`、ISR、默认的图片优化、
+以及任何的 rewrites / redirects / headers 配置。这些都需要一个常驻的 Node 进程。
+</Callout>
+
+## 视频与音乐
+
+国内写博客绕不开一个问题：YouTube 打不开。所以视频统一走 B 站的 iframe 嵌入，
+播放器直接连接 B 站的 CDN，我这边不需要承担任何流量。
+
+```mdx
+<BilibiliVideo bvid="BV1xx411c7mD" title="示例视频" />
+```
+
+渲染出来是这样：
+
+<BilibiliVideo bvid="BV1xx411c7mD" title="示例视频 · 把 bvid 换成你自己的" />
+
+音乐同理，用原生 `<audio>` 就够了。侧栏那个迷你播放器读的是
+`src/lib/music.ts` 里的歌单，把 mp3 丢进 `public/uploads/` 再登记一条就行。
+
+<AudioPlayer src="/uploads/demo.mp3" title="示例曲目" artist="华城" />
+
+<Callout type="info" title="示例音频">
+上面这个播放器指向的 `/uploads/demo.mp3` 是一个占位路径，
+换成你自己的音频文件就能响。
+</Callout>
+
+## 写作时的完整链路
+
+```text
+打开 /admin → TinaCMS 编辑器 → 写文章 → 保存
+     ↓
+调用 GitHub API 提交到仓库
+     ↓
+Cloudflare Pages 检测到更新 → 重新构建 → 部署到 CDN
+     ↓
+大约 1 分钟后线上生效
+```
+
+整个过程中我唯一需要做的事情就是「写字」和「点保存」。这才是一个博客应该有的摩擦力。
+
+<Callout type="danger" title="还没做的两件事">
+评论和搜索目前都没做。评论打算接 Giscus（基于 GitHub Discussions，免费且无需后端），
+搜索打算用 Pagefind 在构建期生成索引——两者都不需要服务器，符合这个站点的定位。
+</Callout>
+
+## 小结
+
+如果把建站比作装修，那大概是这样分工的：
+
+- `.html` 是承重墙，决定房子里有什么
+- `.css` 是装修，决定好不好看
+- `.js` 是电器开关，决定能不能互动
+- `.mdx` 是我的家具说明书——写清楚每件东西怎么用
+
+这套组合没有哪一项是新技术，但拼在一起刚好满足了我那四条互相打架的需求。
+如果你也想搭一个类似的博客，直接从仓库 clone 下来改就行，源码本来就是公开的。

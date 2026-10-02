@@ -1,0 +1,123 @@
+---
+title: Next.js 静态导出的五个坑
+date: 2025-05-02
+tags: [Next.js, 静态导出, 部署]
+summary: 从 Server Actions 到图片优化，把 output export 之后会突然失效的东西一次性列清楚，顺便给出替代方案。
+author: 华城
+---
+
+## 先说结论
+
+`output: "export"` 不是「构建得更彻底一点」，而是**放弃了一整类能力**。
+它会把你从「有一个 Node 进程可以跑代码」的假设里拽出来，回到「我只有一堆文件」。
+
+一开始我以为这只是打包方式变了，直到 CI 报了一堆错才明白，是运行时的假设变了。
+
+## 坑一：Server Actions 直接不可用
+
+写表单的时候顺手用了 Server Action：
+
+```tsx
+async function subscribe(formData: FormData) {
+  "use server";
+  await db.insert(formData.get("email"));
+}
+```
+
+静态导出下这段代码连编译都过不去，因为 Server Action 需要一个能接收 POST 的运行时。
+
+替代方案是回到最朴素的做法——把表单指向一个第三方的无服务器函数：
+
+```tsx
+<form action="https://api.example.com/subscribe" method="post">
+  <input name="email" type="email" required />
+  <button type="submit">订阅</button>
+</form>
+```
+
+<Callout type="tip" title="Cloudflare Workers 是好朋友">
+Pages 和 Workers 在同一个账号下，写一个几十行的 Worker 处理表单，
+既保住了静态站点的速度，又拿回了「能跑代码」的能力。
+</Callout>
+
+## 坑二：动态路由必须提前列全
+
+动态路由在静态导出下必须配合 `generateStaticParams`，
+而且要把 `dynamicParams` 关掉——否则框架不知道还有哪些 slug 需要生成。
+
+```tsx filename="src/app/posts/[slug]/page.tsx"
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return getAllSlugs().map((slug) => ({ slug }));
+}
+```
+
+这样未知的 slug 不会在运行时被渲染，而是直接由静态托管返回 404。
+
+## 坑三：图片优化器需要服务端
+
+默认情况下 `next/image` 会请求 `/_next/image`，那是一个需要 Node 进程的接口。
+静态导出时有两种选择：
+
+| 方案 | 写法 | 适用场景 |
+| --- | --- | --- |
+| 关闭优化 | `images: { unoptimized: true }` | 图片不多，直接用原图 |
+| 自定义 loader | `images: { loader: "custom", loaderFile: "./loader.ts" }` | 交给 Cloudflare Images 之类的服务 |
+
+我选的是第一种。博客配图本来就少，而且都是我自己压过的，
+再套一层优化收益不大，反而多一个失败点。
+
+## 坑四：`getStaticProps` 是 Pages Router 的东西
+
+搜资料的时候经常看到这样的写法：
+
+```tsx
+export async function getStaticProps() { … }
+```
+
+这是 Pages Router 的 API，在 App Router 里完全不生效——而且不会报错，
+它只是被当成一个普通的导出忽略掉，然后你会发现页面数据永远是空的。
+
+App Router 的做法是**直接在组件里 `await`**，因为这个组件本身就运行在构建期：
+
+```tsx filename="src/app/page.tsx"
+export default async function Page() {
+  const posts = getAllPostMeta(); // 构建时执行，结果写进 HTML
+  return <PostList posts={posts} />;
+}
+```
+
+<Callout type="warning" title="别在客户端组件里读文件">
+读 `node:fs` 只能在服务端组件里做。一旦文件顶部写了 `"use client"`，
+再 import `fs` 就会把 Node 内置模块打进浏览器 bundle，构建直接失败。
+</Callout>
+
+## 坑五：环境变量与 Windows 脚本
+
+`next build` 时 `NODE_ENV` 是 `production`，所以任何「开发环境下显示草稿」的逻辑
+在上线时都会自动关掉——这通常是你想要的，但要记得它确实发生了。
+
+另一个更琐碎的问题是跨平台脚本。Windows 的 `cmd` 里写：
+
+```json
+"dev": "set TINA_PUBLIC_IS_LOCAL=true && tinacms dev -c \"next dev\""
+```
+
+看起来没问题，实际上 `set` 会把 `true` 后面那个空格也当成值的一部分，
+最后变量变成了 `"true "`。用 `cross-env` 可以绕开这类坑：
+
+```json
+"dev": "cross-env TINA_PUBLIC_IS_LOCAL=true tinacms dev -c \"next dev\""
+```
+
+## 那到底值不值得
+
+值得，但要看你的场景。
+
+静态站点用「失去动态能力」换来了**极低的运维成本**和**极快的响应速度**。
+对个人博客来说，这个交换非常划算：内容一天最多更新几次，
+但页面一天要被读很多次，而 CDN 恰好擅长后者。
+
+真正需要重新考虑的临界点，大概是你开始想要「每个用户看到不同的内容」的时候。
+到那一天，再把 Worker 或者 D1 加进来也不迟。
