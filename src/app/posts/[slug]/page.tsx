@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CalendarDays, FileText } from "lucide-react";
 import { MdxContent } from "@/components/MdxContent";
-import { PostComments } from "@/components/PostComments";
+import { PostInteractions } from "@/components/PostInteractions";
+import { PostStatsBar } from "@/components/PostStatsBar";
 import { ReadingProgress } from "@/components/ReadingProgress";
 import { TableOfContents } from "@/components/TableOfContents";
 import { TagBadge } from "@/components/TagBadge";
@@ -14,6 +15,7 @@ import {
   getPostBySlug,
   getRelatedPosts,
 } from "@/lib/posts";
+import { readPostComments } from "@/lib/interactions-file";
 import { SITE } from "@/lib/site";
 import { readSiteSettings } from "@/lib/site-settings-file";
 import { formatDate, formatDateISO, formatWordCount } from "@/lib/utils";
@@ -62,6 +64,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const { previous, next } = getAdjacentPosts(slug);
   const related = getRelatedPosts(slug);
   const siteSettings = readSiteSettings();
+  const repoComments = readPostComments(slug);
 
   return (
     <>
@@ -103,6 +106,8 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
               全文 {formatWordCount(post.wordCount)}
             </span>
             <span>作者：{post.author}</span>
+            {/* 浏览次数与点赞：数字只有浏览器知道，所以这里是客户端组件 */}
+            <PostStatsBar slug={slug} settings={siteSettings.interactions} />
           </div>
 
           {post.tags.length > 0 && (
@@ -114,6 +119,18 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           )}
         </header>
 
+        {/* 封面图（frontmatter 的 cover）：列表页的缩略框背景用的也是它 */}
+        {post.cover && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={post.cover}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="mb-8 w-full rounded-2xl border border-stone-200 object-cover dark:border-stone-800"
+          />
+        )}
+
         {/* 目录 */}
         <TableOfContents items={toc} className="mb-8" />
 
@@ -122,8 +139,13 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           <Post />
         </MdxContent>
 
-        {/* 评论：配置了 Giscus 才渲染 */}
-        <PostComments config={siteSettings.giscus} />
+        {/* 评论区：本机评论 + 站长回复（仓库）+ 可选的 Giscus */}
+        <PostInteractions
+          slug={slug}
+          repoComments={repoComments}
+          settings={siteSettings.interactions}
+          giscus={siteSettings.giscus}
+        />
 
         {/* 上一篇 / 下一篇 */}
         {(previous || next) && (

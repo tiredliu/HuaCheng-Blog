@@ -14,5 +14,9 @@
     "strength": 100,
     "blur": 0
   },
-  "giscus": null
+  "giscus": null,
+  "interactions": {
+    "provider": "local",
+    "apiBase": ""
+  }
 }

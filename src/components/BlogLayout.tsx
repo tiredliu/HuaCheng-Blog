@@ -30,6 +30,7 @@ import {
   type ThemePreference,
 } from "@/lib/site-settings";
 import { probeImageUrl } from "@/lib/image-utils";
+import type { CommentItem } from "@/lib/interactions";
 
 export type { ContentWidth, FontScale, SiteSettings, ThemePreference } from "@/lib/site-settings";
 
@@ -39,6 +40,8 @@ export interface BlogLayoutProps {
   stats: { posts: number; tags: number; words: number };
   /** 构建期从 content/site-settings.json 读到的站点默认值 */
   siteSettings: SiteSettings;
+  /** 构建期从 content/guestbook.json 读到的公开留言（站长发布、所有人可见） */
+  repoMessages: CommentItem[];
 }
 
 const isThemePreference = (value: unknown): boolean =>
@@ -59,7 +62,7 @@ const isContentWidth = (value: unknown): boolean => value === "comfortable" || v
  * - **站点默认值**来自 `content/site-settings.json`，构建期注入，首屏就是对的
  * - **访客偏好**存在 localStorage，一旦设过就覆盖站点默认值
  */
-export function BlogLayout({ children, recentPosts, stats, siteSettings }: BlogLayoutProps) {
+export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMessages }: BlogLayoutProps) {
   const isDesktop = useIsDesktop();
 
   // 把站点默认值固定成组件生命周期内的常量：
@@ -231,10 +234,12 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings }: BlogL
       messageOpen,
       wallpaper,
       giscus: defaults.giscus,
+      interactions: defaults.interactions,
     }),
     [
       contentWidth,
       defaults.giscus,
+      defaults.interactions,
       fontScale,
       messageOpen,
       sidebarOpen,
@@ -340,6 +345,8 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings }: BlogL
             onClose={closeMessage}
             isDesktop={isDesktop}
             frosted={wallpaperActive}
+            repoMessages={repoMessages}
+            settings={defaults.interactions}
           />
         </div>
       </div>

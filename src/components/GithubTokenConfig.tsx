@@ -3,32 +3,23 @@
 import { useState } from "react";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SITE } from "@/lib/site";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import {
+  EMPTY_GITHUB_CONFIG,
   GITHUB_CONFIG_KEY,
   isGithubConfig,
-  parseRepoUrl,
+  isGithubConfigured,
   type GithubConfig,
 } from "@/lib/github-upload";
 
-const GUESSED_REPO = parseRepoUrl(SITE.repository);
-
-export const EMPTY_GITHUB_CONFIG: GithubConfig = {
-  token: "",
-  owner: GUESSED_REPO?.owner ?? "",
-  repo: GUESSED_REPO?.repo ?? "",
-  branch: "main",
-};
-
-export function isGithubConfigured(config: GithubConfig): boolean {
-  return Boolean(config.token && config.owner && config.repo);
-}
+// 这两个是「站长模式」的公共定义，放在 lib 里让留言板 / 评论区的代码也能用
+export { EMPTY_GITHUB_CONFIG, isGithubConfigured } from "@/lib/github-upload";
 
 /**
  * GitHub Token 配置块。
  *
- * 两处会用到它：壁纸的「上传到仓库」、以及设置的「保存为站点默认」。
+ * 三处会用到它：壁纸的「上传到仓库」、设置的「保存为站点默认」、
+ * 以及留言 / 评论区的「以站长身份发布与回复」。
  * 都是走 GitHub Contents API 直接写仓库，所以共用同一份配置。
  */
 export function GithubTokenConfig({

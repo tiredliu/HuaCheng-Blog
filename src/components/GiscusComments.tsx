@@ -8,6 +8,10 @@ export interface GiscusCommentsProps {
   config: GiscusConfig | null;
   /** 当前实际生效的主题，用来同步 iframe 的配色 */
   isDark: boolean;
+  /** 嵌在文章评论区里时不要再套一层分隔线与上边距 */
+  embedded?: boolean;
+  heading?: string;
+  hint?: string;
 }
 
 const GISCUS_SCRIPT = "https://giscus.app/client.js";
@@ -26,7 +30,13 @@ const ORIGIN = "https://giscus.app";
  * 配置写在 `content/site-settings.json` 的 `giscus` 字段里，
  * 没有配置就不渲染 —— 此时右侧留言板是本机留言，两者可以并存。
  */
-export function GiscusComments({ config, isDark }: GiscusCommentsProps) {
+export function GiscusComments({
+  config,
+  isDark,
+  embedded = false,
+  heading = "评论",
+  hint = "评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，可以随时导出。",
+}: GiscusCommentsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,16 +85,17 @@ export function GiscusComments({ config, isDark }: GiscusCommentsProps) {
   if (!config) return null;
 
   return (
-    <section className="mt-12 border-t border-stone-200 pt-8 dark:border-stone-800">
+    <section
+      className={
+        embedded ? "" : "mt-12 border-t border-stone-200 pt-8 dark:border-stone-800"
+      }
+    >
       <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide text-stone-500 uppercase dark:text-stone-400">
         <MessageSquare className="h-4 w-4 text-brand-500" />
-        评论
+        {heading}
       </h2>
       <div ref={containerRef} className="min-h-[120px]" />
-      <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-        评论由 GitHub Discussions 提供，需要登录 GitHub 账号；
-        数据保存在仓库的 Discussions 里，可以随时导出。
-      </p>
+      <p className="mt-3 text-[11px] leading-relaxed text-stone-400">{hint}</p>
     </section>
   );
 }

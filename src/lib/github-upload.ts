@@ -1,6 +1,7 @@
 "use client";
 
 import { blobToBase64 } from "@/lib/image-utils";
+import { SITE } from "@/lib/site";
 
 /**
  * 不用后端，直接把文件写进仓库的 `public/uploads/`。
@@ -49,6 +50,27 @@ export function parseRepoUrl(url: string): { owner: string; repo: string } | nul
   const match = /github\.com[/:]([^/]+)\/([^/#?]+)/i.exec(url.trim());
   if (!match) return null;
   return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
+}
+
+const GUESSED_REPO = parseRepoUrl(SITE.repository);
+
+/** owner / repo 从站点里的仓库地址推断，站长只需要填 token */
+export const EMPTY_GITHUB_CONFIG: GithubConfig = {
+  token: "",
+  owner: GUESSED_REPO?.owner ?? "",
+  repo: GUESSED_REPO?.repo ?? "",
+  branch: "main",
+};
+
+/**
+ * 「站长模式」的判定依据。
+ *
+ * 本机存着 GitHub Token 就说明这台浏览器持有仓库写权限 ——
+ * 写文章、传壁纸、保存站点默认值、发布/回复留言，用的都是这一个凭据。
+ * 所以不需要另做一套登录系统：能不能写仓库，就是「是不是站长」。
+ */
+export function isGithubConfigured(config: GithubConfig): boolean {
+  return Boolean(config.token && config.owner && config.repo);
 }
 
 export interface UploadedFile {

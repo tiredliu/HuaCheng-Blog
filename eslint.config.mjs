@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "tina/__generated__/**",
     "public/admin/**",
     "public/uploads/**",
+    // 独立部署的 Cloudflare Worker：不在 Next 的构建里，也不该走 Next 的规则
+    "workers/**",
   ]),
   {
     rules: {

@@ -1,56 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Heart, MessageSquare, Send, Trash2, X } from "lucide-react";
-import { cn, formatRelative } from "@/lib/utils";
-import { SITE } from "@/lib/site";
-import { usePersistentState } from "@/hooks/usePersistentState";
+import { MessageSquare, RotateCcw, X } from "lucide-react";
+import { CommentThreadView } from "@/components/CommentThreadView";
+import { cn } from "@/lib/utils";
+import { isString, usePersistentState } from "@/hooks/usePersistentState";
+import { useCommentThread } from "@/hooks/useCommentThread";
+import {
+  GUESTBOOK_PATH,
+  MESSAGES_KEY,
+  isCommentArray,
+  type CommentItem,
+  type InteractionSettings,
+} from "@/lib/interactions";
 
-export interface GuestMessage {
-  id: string;
-  author: string;
-  content: string;
-  createdAt: string;
-  likes: number;
-  liked?: boolean;
-  /** 站长回复 */
-  reply?: string;
-}
+export type { CommentItem as GuestMessage } from "@/lib/interactions";
 
-/** 内置的示例留言，让静态站首次访问不显得空荡 */
-const SEED_MESSAGES: GuestMessage[] = [
-  {
-    id: "seed-1",
-    author: "阿城",
-    content: "博客改版后清爽多了，左侧导航收起来之后读文章很专注。",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-    likes: 3,
-  },
-  {
-    id: "seed-2",
-    author: "小林",
-    content: "请问 MDX 里嵌入 B 站视频会不会拖慢首屏？",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
-    likes: 1,
-    reply: "不会，iframe 用了 loading=\"lazy\"，滚到位置才会加载。",
-  },
-];
-
-const STORAGE_KEY = "hc-blog:messages";
 const NAME_KEY = "hc-blog:visitor-name";
-
-function isMessageArray(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as GuestMessage).content === "string" &&
-        typeof (item as GuestMessage).id === "string",
-    )
-  );
-}
 
 export interface MessagePanelProps {
   isOpen: boolean;
@@ -58,64 +24,65 @@ export interface MessagePanelProps {
   isDesktop: boolean;
   /** 有壁纸时留言区跟着变半透明 */
   frosted?: boolean;
+  /** 构建期从 `content/guestbook.json` 读到的公开留言（含站长回复） */
+  repoMessages: CommentItem[];
+  /** 站点设置里的互动后端配置 */
+  settings: InteractionSettings;
 }
 
 /**
- * 右侧「可隐藏留言区」。
+ * 右侧「可隐藏留言板」。
  *
- * 纯静态导出没有后端，留言保存在浏览器 localStorage，
- * 也就是说这是一块只属于当前访客的留言板；
- * 后续要真实评论可以接 Giscus（基于 GitHub Discussions，同样免费）。
+ * 权限模型和文章评论区完全一致（共用 `useCommentThread`）：
+ *
+ * - **访客**写下的留言先落在自己的浏览器里，界面上如实写明
+ * - **站长**（本机配好了 GitHub Token）写的留言与回复会提交进
+ *   `content/guestbook.json`，重新构建后**所有访客**都能看到
+ *
+ * 之所以把「公开可见」这件事限定给站长，是因为纯静态站没有服务端：
+ * 要让任意访客写的东西对所有人可见，就必须把仓库写权限发给所有人，
+ * 或者引入一个后端（见 README 的互动服务一节）。
  */
-export function MessagePanel({ isOpen, onClose, isDesktop, frosted = false }: MessagePanelProps) {
-  const [messages, setMessages] = usePersistentState<GuestMessage[]>(
-    STORAGE_KEY,
-    SEED_MESSAGES,
-    isMessageArray,
+export function MessagePanel({
+  isOpen,
+  onClose,
+  isDesktop,
+  frosted = false,
+  repoMessages,
+  settings,
+}: MessagePanelProps) {
+  const [localMessages, setLocalMessages] = usePersistentState<CommentItem[]>(
+    MESSAGES_KEY,
+    [],
+    isCommentArray,
   );
-  const [name, setName] = usePersistentState<string>(NAME_KEY, "", (value) => typeof value === "string");
-  const [input, setInput] = useState("");
+  const [name, setName] = usePersistentState<string>(NAME_KEY, "", isString);
   const listRef = useRef<HTMLDivElement>(null);
+  const [resetHint, setResetHint] = useState(false);
 
-  const likeCount = useMemo(() => messages.reduce((total, item) => total + item.likes, 0), [messages]);
+  const thread = useCommentThread({
+    target: GUESTBOOK_PATH,
+    pathKey: GUESTBOOK_PATH,
+    repoComments: repoMessages,
+    settings,
+    localComments: localMessages,
+    setLocalComments: setLocalMessages,
+  });
+
+  const likeCount = useMemo(
+    () => thread.comments.reduce((total, item) => total + item.likes, 0),
+    [thread.comments],
+  );
 
   useEffect(() => {
     if (!isOpen) return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [isOpen, messages.length]);
+  }, [isOpen, thread.comments.length]);
 
-  const submit = () => {
-    const content = input.trim();
-    if (!content) return;
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `local-${Date.now()}`,
-        author: name.trim() || "匿名访客",
-        content: content.slice(0, 500),
-        createdAt: new Date().toISOString(),
-        likes: 0,
-      },
-    ]);
-    setInput("");
+  const resetLocal = () => {
+    setLocalMessages(() => []);
+    setResetHint(true);
   };
-
-  const toggleLike = (id: string) => {
-    setMessages((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, liked: !item.liked, likes: item.likes + (item.liked ? -1 : 1) }
-          : item,
-      ),
-    );
-  };
-
-  const remove = (id: string) => {
-    setMessages((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const reset = () => setMessages(SEED_MESSAGES);
 
   const panel = (
     <aside
@@ -143,7 +110,8 @@ export function MessagePanel({ isOpen, onClose, isDesktop, frosted = false }: Me
               留言板
             </h2>
             <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-              {messages.length} 条留言 · {likeCount} 个赞 · 存在本机浏览器
+              {thread.comments.length} 条 · {likeCount} 个赞 ·{" "}
+              {thread.remoteReady ? "全站可见" : "公开留言由站长发布"}
             </p>
           </div>
           <button
@@ -156,103 +124,31 @@ export function MessagePanel({ isOpen, onClose, isDesktop, frosted = false }: Me
           </button>
         </div>
 
-        <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-          {messages.map((message) => (
-            <article
-              key={message.id}
-              className="group rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-700 dark:bg-stone-800/50"
-            >
-              <header className="mb-1 flex items-center gap-2">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-[10px] font-bold text-white">
-                  {message.author.slice(0, 1)}
-                </span>
-                <span className="text-xs font-medium text-stone-800 dark:text-stone-100">
-                  {message.author}
-                </span>
-                <span className="ml-auto text-[10px] text-stone-400">
-                  {formatRelative(message.createdAt)}
-                </span>
-              </header>
-
-              <p className="text-[13px] leading-relaxed break-words text-stone-600 dark:text-stone-300">
-                {message.content}
-              </p>
-
-              {message.reply && (
-                <p className="mt-2 rounded-lg border-l-2 border-brand-400 bg-white px-2 py-1.5 text-[12px] text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-                  <span className="font-medium text-brand-600 dark:text-brand-400">
-                    {SITE.author} 回复：
-                  </span>
-                  {message.reply}
-                </p>
-              )}
-
-              <footer className="mt-2 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => toggleLike(message.id)}
-                  aria-pressed={message.liked}
-                  className={cn(
-                    "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] transition-colors",
-                    message.liked
-                      ? "text-brand-600 dark:text-brand-400"
-                      : "text-stone-400 hover:text-brand-500",
-                  )}
-                >
-                  <Heart className={cn("h-3 w-3", message.liked && "fill-current")} />
-                  {message.likes}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => remove(message.id)}
-                  aria-label="删除这条留言"
-                  className="ml-auto rounded-md p-1 text-stone-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-brand-500 focus-visible:opacity-100"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </footer>
-            </article>
-          ))}
+        <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4">
+          <CommentThreadView
+            thread={thread}
+            name={name}
+            onNameChange={setName}
+            dense
+            placeholder="写下留言…（Ctrl / ⌘ + Enter 发送）"
+            emptyHint="还没有留言。"
+          />
         </div>
 
-        <div className="border-t border-stone-200 p-3 dark:border-stone-800">
-          <input
-            type="text"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={20}
-            placeholder="你的昵称（可留空）"
-            className="mb-2 w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-700 placeholder:text-stone-400 focus:border-brand-400 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
-          />
-          <div className="flex gap-2">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) submit();
-              }}
-              maxLength={500}
-              rows={2}
-              placeholder="写下留言…（Ctrl / ⌘ + Enter 发送）"
-              className="flex-1 resize-none rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs text-stone-700 placeholder:text-stone-400 focus:border-brand-400 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
-            />
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!input.trim()}
-              aria-label="发送留言"
-              className="grid w-9 shrink-0 place-items-center self-end rounded-lg bg-brand-500 py-2 text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
+        <div className="border-t border-stone-200 px-3 py-2 dark:border-stone-800">
           <button
             type="button"
-            onClick={reset}
-            className="mt-2 text-[11px] text-stone-400 underline-offset-2 hover:text-brand-500 hover:underline"
+            onClick={resetLocal}
+            className="flex items-center gap-1 text-[11px] text-stone-400 underline-offset-2 hover:text-brand-500 hover:underline"
           >
-            重置为示例留言
+            <RotateCcw className="h-3 w-3" />
+            清空本机留言
           </button>
+          {resetHint && (
+            <p className="mt-1 text-[10px] leading-relaxed text-stone-400">
+              已清空。站长发布在仓库里的留言不会被删掉 —— 那些对所有访客可见。
+            </p>
+          )}
         </div>
       </div>
     </aside>

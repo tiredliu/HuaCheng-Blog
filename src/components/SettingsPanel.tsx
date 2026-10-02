@@ -212,6 +212,45 @@ export function SettingsPanel({
             onResetToSiteDefaults={onReset}
           />
 
+          <Row
+            label="互动统计后端"
+            hint="浏览量 / 点赞 / 评论的数据存在哪，由站点默认值决定"
+          >
+            <div className="space-y-2 text-xs leading-relaxed text-stone-500 dark:text-stone-400">
+              <p>
+                当前：
+                <strong className="font-medium text-stone-600 dark:text-stone-300">
+                  {siteSettings.interactions.provider === "remote"
+                    ? `互动服务（${siteSettings.interactions.apiBase || "地址未填"}）`
+                    : "只统计本机浏览器"}
+                </strong>
+              </p>
+              <p>
+                {siteSettings.interactions.provider === "remote" ? (
+                  <>
+                    浏览量与点赞是全站真实数字，访客的评论也所有人可见；
+                    <strong className="font-medium">回复只有站长能做</strong>，
+                    由互动服务拿你的 GitHub Token 向 GitHub 校验写权限。
+                  </>
+                ) : (
+                  <>
+                    访客看到的浏览量 / 点赞只是他自己浏览器里的记录，评论也留在本机。
+                    想要全站真实数字与公开评论，部署 <code>workers/blog-api</code>
+                    （仓库自带，Cloudflare Worker + KV，免费）后把{" "}
+                    <code>content/site-settings.json</code> 里的{" "}
+                    <code>interactions.provider</code> 改成 <code>&quot;remote&quot;</code>、
+                    并填上 <code>interactions.apiBase</code>。
+                  </>
+                )}
+              </p>
+              <p className="text-[11px] text-stone-400">
+                它是<strong className="font-medium">站点级</strong>配置而不是访客偏好，
+                所以这里不给开关 —— 两边不一致的话，文章页（服务端渲染）和留言板
+                会显示出不同的东西。
+              </p>
+            </div>
+          </Row>
+
           <Row label="偏好存储" hint="访客偏好与站点默认值是两个独立的层">
             <div className="space-y-2 text-xs leading-relaxed text-stone-500 dark:text-stone-400">
               <p>

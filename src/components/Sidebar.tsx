@@ -128,7 +128,7 @@ export function Sidebar({
               {SITE.author}
             </p>
             <p className="truncate text-xs text-stone-500 dark:text-stone-400">
-              {SITE.location} · 前端工程师
+              {SITE.location} · 开发者
             </p>
           </div>
           {!isDesktop && (

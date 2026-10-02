@@ -15,7 +15,9 @@
 | 是什么 | 个人博客，纯静态（构建期生成 HTML，运行期没有 Node） |
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
 | 内容在哪 | `content/posts/*.mdx`（frontmatter + 正文），**这是唯一的内容真相来源** |
+| 公开留言/评论 | `content/guestbook.json` + `content/comments.json`（只有站长能写，构建期读取） |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
+| 可选后端 | `workers/blog-api/`（Cloudflare Worker + KV：浏览量/点赞/评论；**独立部署，不参与 next build**） |
 | 产物 | `out/`，部署到 Cloudflare Pages |
 | 包管理 | npm（Node 22） |
 | 语言 | 注释、文档、UI 文案、commit message **全部用中文** |
@@ -38,7 +40,7 @@ npx tsc --noEmit && npx eslint . && npx next build
 
 ---
 
-## 二、必须知道的 9 条硬约束
+## 二、必须知道的 11 条硬约束
 
 违反这些会「构建成功但线上坏掉」，或者让 dev 直接 500。前 4 条最要命。
 
@@ -115,7 +117,7 @@ React 19 的 `react-hooks/set-state-in-effect` 会直接报错。
 主题配置在 `src/app/globals.css` 的 `@theme` 里。深色模式是
 `@custom-variant dark (&:where(.dark, .dark *))`，靠 `<html class="dark">` 切换。
 
-### 8. 动态路由的参数不能用中文（标签 URL 用 ASCII slug）
+### 9. 动态路由的参数不能用中文（标签 URL 用 ASCII slug）
 
 `/tags/[slug]` 的 `generateStaticParams()` **必须返回 ASCII**。
 
@@ -135,12 +137,28 @@ React 19 的 `react-hooks/set-state-in-effect` 会直接报错。
 忘了补不会坏，会落到 `tag-xxxx` 的兜底 slug，只是不好看。
 两个标签算出同一个 slug 会让**构建直接失败**（故意的，静默合并更难查）。
 
-### 9. `data-scroll-behavior="smooth"` 不能删
+### 10. `data-scroll-behavior="smooth"` 不能删
 
 站点在 `globals.css` 里给 `<html>` 设了 `scroll-behavior: smooth`。
 Next 16 起**默认不再**在导航时覆盖它 —— 不加这个属性，
 每次切页面都会「平滑滚到顶部」，观感很拖沓。
 加上它，导航时 Next 会临时切成 `auto`（瞬时滚顶），页内锚点仍然平滑。
+
+### 11. 所有图片地址都要过 `resolveImageSrc()`
+
+```ts
+// src/lib/site.ts
+resolveImageSrc(value) → 站内绝对路径补 basePath；http(s) 原样；其余原样
+```
+
+**三个引用点必须用同一个函数**：MDX 正文的 `<img>`（`mdx-components.tsx` 的
+`MdxImage`）、列表页卡片的缩略图（`posts.ts` 的 `extractImages`）、
+frontmatter 的 `cover`。任何一处自己拼 `basePath`，子路径部署
+（GitHub Pages 项目页）时就会出现「正文的图好好的、列表页缩略图 404」
+这种**只在子路径构建才暴露**的不一致。
+
+另外，卡片上「有 cover 就不显示正文缩略图带」是**有意的**，别顺手改成两个都显示
+（两种图片语言堆在同一张卡片里很难看）。
 
 ---
 
@@ -167,8 +185,29 @@ Next 16 起**默认不再**在导航时覆盖它 —— 不加这个属性，
                                                 把已生成的文件发出去。
 ```
 
-**没有后端。** 所有「写操作」都是浏览器直连 GitHub Contents API
+**默认没有后端。** 所有「写操作」都是浏览器直连 GitHub Contents API
 （需要站长自己的 fine-grained token，存在访客本地）。
+
+唯一的例外是**可选的互动服务**（`workers/blog-api/`，Cloudflare Worker + KV）：
+部署它之后，浏览量、点赞、评论才会变成全站真实数据。
+不部署也完全能跑 —— 会退化成「只统计本机浏览器」，界面上如实标注。
+两条路的关系是：
+
+```text
+访客读页面 ──┬─ interactions.provider = "local"（默认）→ localStorage，零请求
+             └─ interactions.provider = "remote"       → fetch 到 Worker → KV
+                                                          （失败自动退回上面那条）
+
+站长的写操作 ─┬─ 文章 / 图片 / 站点设置        → GitHub Contents API
+              ├─ provider = "local" 时的留言回复 → 提交 content/*.json，构建后生效
+              └─ provider = "remote" 时的留言回复 → Worker 拿 token 向 GitHub 校验
+                                                    permissions.push 后才写入 KV
+```
+
+⚠️ 互动层的**权限是服务端强制的**，不是「把按钮藏起来」：
+访客可以发表评论，但 `reply` / `owner` / 删除必须带站长凭据，
+Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
+改这块代码时不要在前端「顺手放宽」，那等于把仓库写权限发给所有人。
 
 ---
 
@@ -208,6 +247,12 @@ Next 16 起**默认不再**在导航时覆盖它 —— 不加这个属性，
 | 顶栏按钮 | `src/components/TopBar.tsx` |
 | 左侧导航 | `src/components/Sidebar.tsx` |
 | 右侧留言板 | `src/components/MessagePanel.tsx` |
+| 文章底部评论区 | `src/components/PostInteractions.tsx` + `CommentThreadView.tsx` |
+| 文章页的浏览量与点赞 | `src/components/PostStatsBar.tsx` |
+| 互动数据存哪（本机 / 远程） | `content/site-settings.json` 的 `interactions` |
+| 站长回复写进仓库的格式 | `src/lib/repo-comments.ts` |
+| 列表页卡片的封面与缩略图 | `src/components/PostCard.tsx` + `src/lib/posts.ts` 的 `extractImages()` |
+| 浏览量/点赞/评论的后端 | `workers/blog-api/`（独立部署，改完要单独 `wrangler deploy`） |
 | 设置抽屉 | `src/components/SettingsPanel.tsx` |
 | 壁纸逻辑 | `src/lib/wallpaper.ts` + `WallpaperLayer/Settings.tsx` |
 | 搜索结果排序 / 打分 | `src/lib/search.ts` + `SearchDialog.tsx` |
@@ -220,7 +265,12 @@ Next 16 起**默认不再**在导航时覆盖它 —— 不加这个属性，
 
 | 文件 | 职责 | 注意 |
 | --- | --- | --- |
-| `src/lib/posts.ts` | **构建期**内容层：解析、过滤、字数、目录、相关文章、搜索索引 | 服务端专用 |
+| `src/lib/posts.ts` | **构建期**内容层：解析、过滤、字数、目录、相关文章、搜索索引、正文配图 | 服务端专用 |
+| `src/lib/interactions.ts` | 互动层：本机存储、远程协议、path 规整、评论合并（**零 import，可直接用 Node 跑**） | 客户端安全 |
+| `src/lib/interactions-file.ts` | 构建期读 `content/guestbook.json` / `comments.json` | 服务端专用 |
+| `src/lib/repo-comments.ts` | 站长用 GitHub API 把留言/回复 upsert 进仓库 | 客户端专用 |
+| `src/hooks/useCommentThread.ts` | 评论区与留言板的共同逻辑（发表/回复/删除/合并三来源） | 见硬约束 5 |
+| `src/hooks/useOwnerMode.ts` | 站长模式 = 本机有没有 GitHub Token | — |
 | `src/lib/search.ts` | 切词、打分、排序（**纯函数，客户端安全**） | 标签 slug 见下 |
 | `src/lib/tag-slug.ts` | 标签名 ⇄ URL slug（**纯函数，客户端安全**） | 中文标签要在这里登记 |
 | `src/lib/site-settings.ts` | 站点默认值的类型、校验、**防闪屏脚本生成** | 客户端安全 |
@@ -303,6 +353,44 @@ esbuild 写 `os.tmpdir()` 被拒（杀软/策略），报
 
 **教训**：一个改动如果让 dev 通过却让产物变奇怪，先去看产物。
 
+### 8. 用 PowerShell 检查产物里的中文，会「假失败」
+
+曾经这样验证产物：
+
+```powershell
+$html = Get-Content out/index.html -Raw
+if ($html -match '这条置顶说明由站长发布') { ... }   # 永远 FAIL
+```
+
+同一份 HTML 用 `grep`/ripgrep 搜得到，用 PowerShell 的命令行参数传中文字面量就是搜不到 ——
+**中文在经过 `pwsh -Command` 这一层时被转坏了**，而且不会报错，只是安静地匹配失败。
+当时差点得出「留言没渲染出来」的错误结论。
+
+**教训**：验证脚本里出现中文期望值时，用 Node 或 ripgrep，别用 PowerShell 的行内中文字面量。
+ASCII 部分（`workers/blog-api` 这种）反而是好的，所以失败会一半一半，特别像「功能坏了一半」。
+
+### 9. 静态导出的 HTML 里有 RSC 数据，「字符串在里面」≠「渲染出来了」
+
+`out/**.html` 末尾跟着一大段 `self.__next_f.push(...)`，
+里面是**序列化后的原始 props**。曾经这样验证「有封面时不该显示缩略图」：
+
+```js
+html.includes("/uploads/zz-a.jpg")   // true —— 但页面上根本没显示它
+```
+
+因为那篇文章的 `post.images` 数组本身就包含 zz-a，props 被原样写进了 flight 数据。
+
+**做法**：判断「渲染出来了没有」之前先切掉这段：
+
+```js
+const dom = (html) => html.slice(0, html.indexOf("self.__next_f"));
+```
+
+顺带一个同源的小坑：React 会在 `{表达式}` 和后面的文本之间插 `<!-- -->`，
+所以 `花城 回复` 这种拼接出来的文案要写成 `/花城(<!-- -->)?\s*回复/` 才匹配得到。
+
+**教训**：产物验证要区分「数据在页面里」和「用户看得见」。
+
 ---
 
 ## 七、常见改动的标准做法
@@ -342,6 +430,31 @@ draft: false
 
 新增全局组件就在那个文件的 `components` 对象里加一行。
 
+### 给文章加封面 / 正文配图
+
+| 想要的效果 | 怎么写 |
+| --- | --- |
+| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /uploads/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
+| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/uploads/a.jpg)` 或 `<img src="/uploads/a.jpg" />` |
+
+`extractImages()` 会自动跳过代码块/行内代码里的图片、`data:` 内联图和相对路径，
+最多取 4 张。**有 `cover` 时不再显示缩略图带**（有意的，见硬约束 11）。
+
+### 改互动（浏览量 / 点赞 / 评论）的行为
+
+| 想改什么 | 动哪里 |
+| --- | --- |
+| 后端是本机还是全站 | `content/site-settings.json` 的 `interactions.provider` / `apiBase` |
+| 本机模式的存储与合并规则 | `src/lib/interactions.ts`（纯函数，优先在这里改，可以直接用 Node 验） |
+| 发表/回复/删除的编排 | `src/hooks/useCommentThread.ts` |
+| 评论区或留言板的排版 | `src/components/CommentThreadView.tsx`（两者共用） |
+| 站长写进仓库的文件格式 | `src/lib/repo-comments.ts` + `src/lib/interactions-file.ts`（**读写两侧要同时改**） |
+| 服务端的权限校验、限流、上限 | `workers/blog-api/src/index.js`，改完要单独 `wrangler deploy` |
+
+⚠️ 动第 5 行之前先想清楚：`interactions-file.ts` 读的字段和
+`repo-comments.ts` 写的字段必须一一对应，而且都要能在
+`content/*.json` 里被手改坏之后**优雅降级**（丢那一条 + 打一行警告，不让构建失败）。
+
 ### 改站点默认值
 
 编辑 `content/site-settings.json`，或在前台「设置 → 站点默认值」里保存（需要 GitHub token）。
@@ -380,6 +493,21 @@ npx serve out          # 或 python -m http.server -d out 8080
 - 深色模式刷新有没有闪屏
 - 侧栏播放器能不能出声、切三种模式
 - 桌面端点留言区的 × 会不会收起
+- **留言板里那 3 条公开留言**（其中一条带「站长」徽标、一条带站长回复）是否在 HTML 里
+- 文章页头部有没有「— 次浏览」占位、底部有没有评论输入框
+- **有 `cover` 的文章**：列表页卡片是不是图片背景、文章页顶部有没有大图
+- **正文有图的文章**：卡片底部有没有缩略图带（且代码块里的图没被算进去）
+
+### 验产物时的两个坑（都真实踩过）
+
+1. **别用 PowerShell 的行内中文去匹配 HTML** —— 中文经过 `pwsh -Command` 会被转坏，
+   匹配永远失败且不报错。用 Node 或 ripgrep。
+2. **`out/**.html` 末尾有 RSC（flight）数据**，里面是原始 props。
+   判断「有没有渲染出来」之前先切掉：
+   `html.slice(0, html.indexOf("self.__next_f"))`。
+   否则会出现「`post.images` 里有这张图 → 以为卡片显示了缩略图」这种假阳性。
+
+详细经过见「六、踩过的坑」第 8、9 条。
 
 ### 碰到「时好时坏」的问题，先删缓存
 
@@ -412,16 +540,19 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 文章展示 · 后台写作 · 标签归档 · RSS · **站内搜索（含时间排序）** ·
 **代码高亮（Shiki 双主题）** · **数学公式（KaTeX）** · 标签 / 归档 ·
 视频 / 音乐 · **自定义壁纸（含直传仓库）** · **站点默认值存仓库** ·
-**Giscus 评论** · 深浅色主题 · **头像**
+深浅色主题 · **头像** · **列表页封面图与正文缩略图** ·
+**浏览量 / 点赞**（本机 / 全站两档） · **评论区（三条通道）** ·
+**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）**
 
 ### 明确没做（以及原因）
 
 | 没做 | 原因 |
 | --- | --- |
-| 图片自动优化 | 静态导出下 `next/image` 优化器不可用；且仓库里目前没有图片 |
-| 阅读量统计 | 需要引入 Workers + D1 |
+| 图片自动优化 | 静态导出下 `next/image` 优化器不可用；列表页缩略图也是原图缩放，图多了这里最该先优化 |
+| 精确的阅读量 | 互动服务用的 KV 没有事务，并发写会互相覆盖；要精确得上 D1 |
+| 浏览量的防刷 | `/hit` 谁都能调，可以被脚本刷；个人博客不做这个投入 |
 | 代码块行号 / 行高亮 | Shiki 的 transformers 需要传函数，Turbopack 下不可用 |
-| 匿名评论 | Giscus 需要 GitHub 账号；换 Waline 一类就要部署服务 |
+| 匿名的全站评论 | 默认模式的评论只在本机；全站可见要么部署互动服务，要么用 Giscus（需要 GitHub 账号） |
 
 ### 性能现状（实测）
 
