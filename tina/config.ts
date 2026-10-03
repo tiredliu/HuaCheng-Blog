@@ -80,7 +80,9 @@ export default defineConfig({
           {
             type: "image",
             name: "cover",
-            label: "封面图",
+            label: "封面图（列表页缩略框的背景）",
+            description:
+              "从媒体库选一张图，它会成为列表页那张卡片、以及文章页顶部的背景图；留空时卡片会自动展示正文里插入的图片缩略图。",
           },
           {
             type: "boolean",

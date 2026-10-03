@@ -5,6 +5,7 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import { BlogLayout } from "@/components/BlogLayout";
 import { getAllPostMeta, getSiteStats } from "@/lib/posts";
+import { readGuestbook } from "@/lib/interactions-file";
 import { SITE } from "@/lib/site";
 import { readSiteSettings } from "@/lib/site-settings-file";
 import { buildBootstrapScript } from "@/lib/site-settings";
@@ -68,6 +69,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const stats = getSiteStats();
   const siteSettings = readSiteSettings();
   const bootstrapScript = buildBootstrapScript(siteSettings);
+  // 留言板里「站长发布、所有人可见」的那部分：构建期读，和文章一样随仓库走
+  const repoMessages = readGuestbook();
 
   return (
     <html lang="zh-CN" suppressHydrationWarning data-scroll-behavior="smooth">
@@ -79,6 +82,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           recentPosts={recentPosts}
           stats={{ posts: stats.posts, tags: stats.tags, words: stats.words }}
           siteSettings={siteSettings}
+          repoMessages={repoMessages}
         >
           {children}
         </BlogLayout>

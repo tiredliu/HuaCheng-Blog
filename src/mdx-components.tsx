@@ -4,7 +4,7 @@ import type { AnchorHTMLAttributes, ImgHTMLAttributes, ReactNode } from "react";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { BilibiliVideo } from "@/components/BilibiliVideo";
 import { Callout } from "@/components/Callout";
-import { withBasePath } from "@/lib/site";
+import { resolveImageSrc, withBasePath } from "@/lib/site";
 
 type HeadingProps = {
   id?: string;
@@ -60,10 +60,25 @@ function MdxLink({ href = "", children, ...rest }: AnchorHTMLAttributes<HTMLAnch
   );
 }
 
+/**
+ * 正文里的图片。
+ *
+ * 两个细节：
+ * - 站内绝对路径要补 `basePath`（和 Markdown 链接同一个理由，见上面 `MdxLink`），
+ *   否则子路径部署时正文的图会 404
+ * - 静态导出下 `next/image` 的优化器不可用，所以这里刻意用原生 `<img>`
+ *   （`next.config.ts` 里的 `images.unoptimized` 就是为此而开）
+ */
 function MdxImage({ src = "", alt = "", ...rest }: ImgHTMLAttributes<HTMLImageElement>) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} loading="lazy" decoding="async" {...rest} />
+    <img
+      src={resolveImageSrc(src) ?? src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      {...rest}
+    />
   );
 }
 

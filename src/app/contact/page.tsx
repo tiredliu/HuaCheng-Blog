@@ -70,24 +70,39 @@ export default function ContactPage() {
       <section className="animate-fade-up mt-8 rounded-2xl border border-dashed border-stone-300 p-5 dark:border-stone-700">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800 dark:text-stone-100">
           <MessageSquare className="h-4 w-4 text-brand-500" />
-          关于留言板
+          关于留言板与评论区
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
-          点击右上角的留言图标可以打开右侧留言区。因为整站是纯静态导出的，
-          留言目前保存在你自己的浏览器里（localStorage），换设备看不到 ——
-          它是这块版面的演示，而不是真实的公共评论。
+          点击右上角的留言图标可以打开右侧留言板，文章底部也有评论区，两者用法一样。
+          整站是纯静态导出的，没有服务端，所以<strong className="font-medium">你写下的留言与评论
+          默认只保存在你自己的浏览器里</strong>（localStorage），换设备就看不到了 ——
+          我这边也不会收到。
         </p>
         <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
-          如果你希望有真正公开的评论区，接入{" "}
+          页面上带「站长」徽标、以及带站长回复的内容是例外：那些是我提交进仓库的，
+          <strong className="font-medium">所有访客都能看到</strong>，也只有我能写、能回复。
+          如果你想让自己的留言被所有人看到，最直接的方式是发邮件
+          <a
+            href={`mailto:${SITE.email}`}
+            className="mx-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            {SITE.email}
+          </a>
+          ，或者在 GitHub 上开一个 Issue。
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+          想让「任何人评论、所有人可见、站长直接在页面上回复」真正跑起来，
+          需要两条外部通道之一：
           <a
             href="https://giscus.app/zh-CN"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+            className="mx-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
           >
             Giscus
-          </a>{" "}
-          即可：它基于 GitHub Discussions，同样免费、同样不需要后端。
+          </a>
+          （基于 GitHub Discussions，免费、不需要后端，但评论者要有 GitHub 账号），
+          或者仓库里自带的互动服务（Cloudflare Worker + KV）。
         </p>
       </section>
     </>

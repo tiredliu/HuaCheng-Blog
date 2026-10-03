@@ -72,7 +72,7 @@
 | 代码高亮 | Shiki + `@shikijs/rehype` | 4.5.0 | 构建期着色，双主题 |
 | 数学公式 | KaTeX + `rehype-katex` + `remark-math` | 0.19.0 / 7.0.1 / 6.0.0 | 构建期渲染 |
 | 内容管理 | TinaCMS | 3.8.1 / CLI 2.3.1 | 网页编辑器，保存即提交 GitHub |
-| 评论 | Giscus | — | GitHub Discussions 的前端 |
+| 评论 | 本机 / Cloudflare Worker / Giscus | — | 三条通道并存，见第十节 |
 | 版本存储 | GitHub | — | 源码、文章、站点设置、上传的图片 |
 | 托管 | Cloudflare Pages | — | 全球 CDN，国内速度较好 |
 | 视频嵌入 | Bilibili iframe | — | 国内可直接播放、免流量 |
@@ -151,8 +151,8 @@
 | **上传图片** | 浏览器直连 GitHub Contents API（见 13.5），或用 TinaCMS 媒体库 |
 | **保存站点设置** | 同样直连 GitHub API 写 `content/site-settings.json`（见第十二章） |
 | **站内搜索** | 构建期生成静态索引，浏览器本地匹配（见第八节） |
-| **评论** | Giscus（GitHub Discussions，见第十节）。右侧留言板则存本机 `localStorage` |
-| 阅读量统计 | 未实现；建议用 Cloudflare Workers + D1 或 Umami |
+| **评论** | 三条通道：本机 `localStorage`（默认）、自带的 Cloudflare Worker（全站可见）、Giscus（GitHub Discussions，默认未启用）。见第十节 |
+| **浏览量 / 点赞** | 默认只统计本机；部署 `workers/blog-api` 后走 Worker + KV。见 10.7 |
 | 动态内容 | 不需要——所有访客看到的内容都一样 |
 
 真正需要后端的临界点是「**让任意访客写入**」：
@@ -194,12 +194,14 @@ hua-cheng-blog/
 │   │   ├── SearchDialog.tsx          ★ ⌘K 搜索弹窗（高亮 + 键盘导航）
 │   │   ├── Sidebar.tsx               左侧导航（可隐藏、可拖拽调宽）
 │   │   ├── ContentArea.tsx           中间内容区
-│   │   ├── MessagePanel.tsx          右侧留言区（可隐藏，本机留言）
+│   │   ├── MessagePanel.tsx          右侧留言板（仓库留言 + 本机留言 + 站长回复）
+│   │   ├── CommentThreadView.tsx     ★ 评论/留言的展示与输入（两处共用）
+│   │   ├── PostInteractions.tsx      ★ 文章底部评论区
+│   │   ├── PostStatsBar.tsx          文章头部的浏览次数与点赞
 │   │   ├── SettingsPanel.tsx         设置抽屉 + 站点默认值的保存/恢复
 │   │   ├── WallpaperLayer.tsx        ★ 全屏壁纸层
 │   │   ├── WallpaperSettings.tsx     壁纸设置（预设/直传仓库/本机）
-│   │   ├── GithubTokenConfig.tsx     GitHub Token 配置（两处共用）
-│   │   ├── PostComments.tsx          文章底部评论区（从 Context 取主题）
+│   │   ├── GithubTokenConfig.tsx     GitHub Token 配置（三处共用）
 │   │   ├── GiscusComments.tsx        ★ Giscus 接入
 │   │   ├── MdxContent.tsx            MDX 渲染容器（只负责套 .article）
 │   │   ├── BilibiliVideo.tsx         B 站视频嵌入
@@ -214,17 +216,22 @@ hua-cheng-blog/
 │   │
 │   ├── hooks/
 │   │   ├── usePersistentState.ts     ★ localStorage ⇄ React 状态
-│   │   └── useMediaQuery.ts          断点判断
+│   │   ├── useMediaQuery.ts          断点判断
+│   │   ├── useOwnerMode.ts           ★ 站长模式（本机有没有 GitHub Token）
+│   │   └── useCommentThread.ts       ★ 评论/留言的共同逻辑
 │   │
 │   ├── lib/
-│   │   ├── posts.ts                  ★ 构建期内容层（Node API，含索引生成）
+│   │   ├── posts.ts                  ★ 构建期内容层（Node API，含索引与配图提取）
+│   │   ├── interactions.ts           ★ 互动层：本机存储 + 远程协议（零 import）
+│   │   ├── interactions-file.ts      构建期读 content/*.json
+│   │   ├── repo-comments.ts          站长把回复写进仓库
 │   │   ├── site-settings.ts          ★ 站点默认值类型/校验/防闪屏脚本
 │   │   ├── site-settings-file.ts     构建期读取 content/site-settings.json
 │   │   ├── search.ts                 切词与打分（客户端安全，无 node 依赖）
 │   │   ├── tag-slug.ts               ★ 标签名 ⇄ URL slug（客户端安全，见 7.5）
-│   │   ├── site.ts                   站点常量 + basePath 拼接
+│   │   ├── site.ts                   站点常量 + basePath + 图片路径规整
 │   │   ├── wallpaper.ts              壁纸预设、解析、上传记录
-│   │   ├── github-upload.ts          ★ 直传 GitHub 仓库（图片 + 站点设置）
+│   │   ├── github-upload.ts          ★ 直传 GitHub 仓库（图片 + 设置 + 站长凭据）
 │   │   ├── image-utils.ts            图片压缩、缩略图、base64、URL 探测
 │   │   ├── music.ts                  歌单与播放模式
 │   │   └── utils.ts                  日期/数字/className 工具
@@ -233,7 +240,10 @@ hua-cheng-blog/
 │
 ├── content/
 │   ├── posts/*.mdx                   文章本体
+│   ├── guestbook.json                ★ 站长发布的公开留言
+│   ├── comments.json                 ★ 站长发布的公开评论与回复
 │   └── site-settings.json            ★ 站点默认设置（可提交、可在线改）
+├── workers/blog-api/                 ★ 可选的 Cloudflare Worker：浏览量/点赞/评论后端
 ├── public/
 │   ├── avatar.png / avatar-128.png   ★ 头像（大图 + 列表用小图）
 │   ├── og-cover.png                  ★ 社交平台分享卡片
@@ -267,13 +277,22 @@ hua-cheng-blog/
 | `tags` | string[] | — | 支持 `[a, b]` 与 `a, b, c` 两种写法 |
 | `summary` | string | — | 列表页摘要；缺失时自动截取正文首段 96 字 |
 | `author` | string | — | 默认取站点作者 |
-| `cover` | string | — | 封面图（预留给未来的卡片样式） |
+| `cover` | string | — | 封面图：列表页卡片的**背景**，同时显示在文章页顶部 |
 | `draft` | boolean | — | `true` 时只在 `npm run dev` 可见 |
+
+正文里插入的图片不用声明：`src/lib/posts.ts` 的 `extractImages()` 会从 MDX 里
+把前 4 张（`![说明](src)` 与 `<img src>`）抠出来放进 `PostMeta.images`，
+给列表页的缩略图带用。**有 `cover` 时不再显示缩略图带** ——
+理由见 17.13。
 
 ### 6.2 TinaCMS 字段映射
 
 `tina/config.ts` 里的字段**必须和上表一一对应**，否则后台存出来的文章前台读不到。
 这是两块代码之间唯一的耦合点，也是最容易出错的地方。
+
+`cover` 那个字段在后台的标签是「封面图（列表页缩略框的背景）」，
+选图后 TinaCMS 会把文件写进 `public/uploads/` 并在 frontmatter 里填好路径 ——
+**正文里插入的图片不需要在后台声明**，它们由 `extractImages()` 从 MDX 里读。
 
 TinaCMS 的 `router` 指向 `/posts/${filename}`，所以保存后会跳转到前台对应地址。
 
@@ -440,7 +459,7 @@ Next 16 里这个函数**不接受任何参数**，直接返回组件表（老�
 | `h2` `h3` `h4` | 覆盖为带悬停 `#` 锚点的版本 |
 | `a` | 外链加 `target="_blank"`；**站内链接补 `basePath`**（见下） |
 | `pre` | 包一层容器，从 `<code class="language-x">` 里读出语言名做标签 |
-| `img` | 原生 `<img>` + `loading="lazy"`（静态导出下 `next/image` 优化器不可用） |
+| `img` | 原生 `<img>` + `loading="lazy"`，并**用 `resolveImageSrc()` 补 `basePath`**（见 17.14） |
 | `table` | 包一层横向滚动容器 |
 | `kbd` | 快捷键样式 |
 
@@ -700,17 +719,113 @@ frame.contentWindow.postMessage(
 
 ### 10.5 右侧留言板的定位
 
-留言板（`MessagePanel`）和 Giscus 是**两种不同的东西**，不是重复实现：
+留言板和文章评论区**不是重复实现**，而是同一套逻辑的两个落点：
 
-| | 右侧留言板 | 文章底部 Giscus |
+| | 右侧留言板 | 文章底部评论区 |
 | --- | --- | --- |
 | 面向 | 站点整体的一句短留言 | 针对某篇文章的讨论 |
-| 存储 | 浏览器 `localStorage` | 仓库的 Discussions |
-| 谁能看到 | 只有留言者自己 | 所有人 |
-| 需要登录 | ❌ | ✅ |
+| 公开数据文件 | `content/guestbook.json` | `content/comments.json` |
+| 互动服务里的 path | `guestbook` | 文章 slug |
+| 代码 | 都用 `useCommentThread` + `CommentThreadView` | 同左 |
 
 留着的价值是：**它不需要任何配置就能用**，也给了「不想登录 GitHub 的人」一个说话的地方。
 界面上如实写明「存在本机浏览器」，不假装它是公共评论区。
+
+### 10.6 三条评论通道，各自解决不同的问题
+
+「评论系统」在这一版里被拆成了三条，因为**没有一条能同时满足所有情况**：
+
+| 通道 | 需要什么 | 谁看得见 | 站长怎么回复 | 代价 |
+| --- | --- | --- | --- | --- |
+| 本机评论（默认） | 无 | 只有自己 | 看不到，回不了 | 无法交流 |
+| 互动服务（Worker + KV） | 部署一次 | 所有人 | 页面上直接回复 | 多了一个要维护的部署 |
+| Giscus（GitHub Discussions） | 配置 + 访客有 GitHub 账号 | 所有人 | 在 Discussions 里回复 | 门槛高；默认未启用 |
+
+三者的关系是**并存**而不是三选一：本机评论永远在（它是「零配置也能说话」的底线），
+Giscus 配了就多一条，互动服务部署了就再往前一步。
+
+**为什么不干脆只留 Giscus**：Giscus 需要 GitHub 账号，而留言板存在的意义之一
+恰恰是「不想登录的人也能说一句」。反之只留本机评论则永远无法交流。
+所以把选择权交给站长：默认零配置可用，想要公开交流时再往上加一层。
+
+### 10.7 浏览量 / 点赞：为什么是自建 Worker，而不是现成计数器
+
+这个需求的本质是「谁记住这个数字」。纯静态站没有记忆，只有三种可能：
+
+| 方案 | 为什么否决 |
+| --- | --- |
+| 不蒜子 / CountAPI 一类免费公众计数器 | **它们会消失**。不蒜子原站已经整站 502，CountAPI 已停止服务 —— 用它们等于把阅读量托管在一个人的服务器上 |
+| GA / Clarity / Cloudflare Web Analytics | 服务本身很稳，但**读数字必须用带密钥的服务端接口**。把密钥放进纯静态页面等于公开它；GA 一类在国内还访问不了 |
+| Firebase / Firestore | 厂商够稳，但国内直连不稳定，与「国内访问快」这条硬需求冲突 |
+| **一小段自己的代码跑在大厂 serverless 上** | ✅ 选它 |
+
+结论：**能同时满足「免费、不会倒闭、国内快、不需要常驻服务器」的只有
+Cloudflare Workers + KV** —— 而这恰好是本站已经在用的托管商，
+最坏情况（Cloudflare 挂了）也只是这一个功能降级，页面本身照常。
+
+关键取舍是**默认关闭**：`interactions.provider` 默认 `"local"`，
+不部署就一个第三方请求都不发（保住了「无外链 JS」的性能前提），
+界面上把数字标注成「（本机）」，不假装它是全站数据。
+
+失败模式也是设计的一部分：远程请求失败（没部署 / 断网 / 被 CORS 挡）
+一律**静默退化成本机计数**，绝不弹错误、绝不白屏。
+但**写操作例外** —— 发表、回复、删除失败时必须把原因说出来，
+否则站长会看到「回复没生效」却不知道为什么（见 10.8）。
+
+### 10.8 回复为什么只有站长能做（以及它在服务端怎么强制）
+
+需求是「访客能发言，但回复只有站长能做」。这条规则**必须在服务端强制**，
+否则就只是「把按钮藏起来」：任何人打开控制台都能发同样的请求。
+
+所以两个后端各自提供了一个不可绕过的检查点：
+
+| 后端 | 强制点 | 具体做法 |
+| --- | --- | --- |
+| 仓库文件（`provider: "local"`） | **写仓库需要仓库写权限** | 回复走 GitHub Contents API，没有 token 根本提交不上去 |
+| 互动服务（`provider: "remote"`） | Worker 里的一次上游校验 | 拿请求里的 token 调 `GET /repos/{owner}/{repo}`，要求 `permissions.push === true`；不通过就 403 且**一个字节都不写** |
+
+几个刻意的细节：
+
+- **不调 `GET /user`**：fine-grained PAT 只给了 `Contents: Read and write` 时
+  `/user` 会返回 403，用它会把真站长也挡在门外。仓库详情接口才反映「能不能写这个仓库」。
+- **校验失败即拒**：GitHub 超时 / 5xx / 限流一律返回 503，绝不「放行一次」。
+- **不跨请求缓存校验结果**：Worker 的 isolate 会被随时回收，
+  用内存缓存判断权限很容易出隐蔽的越权 bug，宁可每写一次多打一次 GitHub。
+- `owner` / `reply` / `replyAt` / `likes` **由服务端剥离或覆盖**：
+  访客把这些字段塞进请求体也没用，`createdAt` 一律用服务器时间。
+
+前端这边只有一个判断：**本机有没有配好 GitHub Token**。
+它意味着这台浏览器持有仓库写权限，而这正是写文章、传图片、存站点默认值
+用的**同一个凭据**。所以站点不需要第二套登录系统 —— 能写仓库的人就是站长。
+
+### 10.9 互动数据的存储结构与「脏数据」策略
+
+```text
+                     ┌─ 仓库：content/guestbook.json ─ 站长发布，构建时读进 HTML
+访客打开一篇文章 ────┼─ 仓库：content/comments.json  ─ 站长发布/回复，构建时读
+                     ├─ 远程：KV  stats:/likers:/comments:<path>  ─ 所有人共享
+                     └─ 本机：localStorage ─ 访客自己的浏览/点赞/评论
+```
+
+展示时的合并规则是**去掉三者里重复的 id、仓库优先、按时间正序**：
+
+```ts
+mergeComments([...repoComments, ...remoteComments], localComments)
+```
+
+「仓库优先」是有原因的：同一条评论一旦被站长收录进仓库并回复过，
+仓库那一份才是完整的（带 `reply`），本机那份可能还停在收录之前的版本。
+而用 id 去重还顺带解决了「站长刚提交完、重新构建还没跑完」的空窗期 ——
+本机先显示一条带「待构建」标记的副本，构建完成后两边 id 相同，自然合成一条。
+
+`content/guestbook.json` 与 `content/comments.json` 都遵循和 `site-settings.json`
+一样的**逐条降级**策略：文件缺失 / 非法 JSON / 某一条字段类型不对，
+都只影响那一条（丢掉并打一行警告），**不让构建失败**。
+BOM 也照旧要剥掉（见 12.4 那个真实 bug）。
+
+**KV 不是精确计数**：Cloudflare KV 没有事务，同一瞬间的两次写会互相覆盖，
+所以高并发下浏览量可能少量丢失。这一点在 Worker 的 README 里如实写明，
+不做精确性承诺 —— 对个人博客够用，但它是**取舍**而不是疏忽。
 
 ---
 
@@ -832,8 +947,13 @@ frame.contentWindow.postMessage(
 | `hc-blog:music-mode` | `"list"｜"one"｜"shuffle"` | `list` | 播放模式 |
 | `hc-blog:music-volume` | number | `0.8` | 音量 0–1 |
 | `hc-blog:music-list-open` | boolean | `false` | 播放列表是否展开 |
-| `hc-blog:messages` | array | 内置示例 | 本机留言 |
-| `hc-blog:visitor-name` | string | `""` | 留言昵称 |
+| `hc-blog:messages` | array | `[]` | 本机留言（公开留言在 `content/guestbook.json`） |
+| `hc-blog:post-comments` | object | `{}` | `{ [slug]: CommentItem[] }`，本机评论 |
+| `hc-blog:comment-likes` | object | `{}` | 本机点赞过的评论 id（评论的赞只记本机） |
+| `hc-blog:views` | object | `{}` | `{ [path]: number }`，本机浏览数（远程可用时只作退化兜底） |
+| `hc-blog:likes` | object | `{}` | `{ [path]: boolean }`，「我点过赞没有」 |
+| `hc-blog:visitor-id` | string | 首次访问生成 | 匿名 id，只用于给点赞去重 |
+| `hc-blog:visitor-name` | string | `""` | 留言/评论昵称 |
 
 > `hc-blog:github` 里存着一个**能往仓库写文件的凭据**。
 > 之所以敢这么做，是因为它只存在访问者自己的浏览器里、只发往 `api.github.com`，
@@ -1176,6 +1296,7 @@ Node 的 `os.tmpdir()` 在 Windows 上优先读 `TEMP`，所以启动器把它�
 | 视频走 B 站 iframe + `loading="lazy"` | 免流量，滚到位置才加载 |
 | 图标按需引入 lucide-react | tree-shaking 后每个图标约 1KB |
 | 内置壁纸用 CSS | 零请求、零解码 |
+| 互动层默认 `local` | 浏览量/点赞/评论一个第三方请求都不发（部署互动服务后才有，见 10.7） |
 | 纯静态 + CDN | 文件直接下发，无计算 |
 | 单页 JS 体积受控 | 没有引入动画/图表/富文本编辑器到前台 |
 
@@ -1185,7 +1306,10 @@ Node 的 `os.tmpdir()` 在 Windows 上优先读 `TEMP`，所以启动器把它�
 | --- | --- |
 | 不能用 Server Actions / ISR / cookies | 这些都需要常驻 Node 进程 |
 | `next/image` 优化器不可用 | 博客配图少且已手动压过，多一层优化收益不大、多一个失败点 |
-| 留言只存在本机 | 不做后端的必然结果，界面上已如实说明 |
+| 默认模式下留言与评论只存在本机 | 不做后端的必然结果，界面上已如实说明，并给了三条出路（见 10.6） |
+| 互动服务用的 KV 没有事务 | 并发写会互相覆盖，浏览量可能少量丢失；要精确得上 D1 |
+| 浏览量没有防刷 | `/hit` 谁都能调；防刷要引入验证码或限流，对个人博客不划算 |
+| 列表页缩略图是原图缩放 | 没有构建期生成小图，图多起来之后这里最该先优化（见 17.10） |
 | 构建时间从约 3 秒增加到约 15 秒 | 高亮与公式都在构建期完成，把成本从「每个访客」转移到了「每次构建」 |
 | 代码块没有行号 / 行高亮 | Shiki 的 `transformers` 需要传函数，Turbopack 不接受 |
 | 图片没有自动优化 | 静态导出下 `next/image` 优化器不可用，见 17.10 |
@@ -1214,10 +1338,14 @@ Node 的 `os.tmpdir()` 在 Windows 上优先读 `TEMP`，所以启动器把它�
 | **数学公式** | ✅ | KaTeX 构建期渲染，字体只在实际用到时下载 |
 | **头像 / 分享图** | ✅ | 仓库里的静态文件，换图不用改代码 |
 | **站点默认值** | ✅ | 存仓库 `content/site-settings.json`，构建期注入，首屏即生效 |
-| **评论系统** | ✅ | Giscus（GitHub Discussions），配置即启用；默认不开 |
-| 阅读量统计 | ⬜ | 建议 Cloudflare Workers + D1，或 Umami |
-| 图片自动优化 | ⬜ | 静态导出下有真实阻碍，见 17.10 |
-| 后端 API | ⬜ | 纯静态方案，需要时再加 Workers + D1 |
+| **浏览量 / 点赞** | ✅ | 默认只统计本机；部署 `workers/blog-api` 后是全站真实数字 |
+| **评论区** | ✅ | 本机评论（零配置）/ 互动服务（全站可见）/ Giscus（默认未启用） |
+| **留言与评论的回复** | ✅ | **只有站长能做**，服务端强制；回复写进仓库或互动服务 |
+| **列表页封面与缩略图** | ✅ | `cover` 当卡片背景；没有封面时展示正文前 4 张图的缩略图带 |
+| 精确的阅读量 | ⬜ | KV 没有事务，并发写会互相覆盖；要精确得上 D1 |
+| 浏览量的防刷 | ⬜ | `/hit` 谁都能调，可以被脚本刷 |
+| 图片自动优化 | ⬜ | 静态导出下有真实阻碍，见 17.10；列表页缩略图也是原图缩放 |
+| 后端 API | ⬜ | 纯静态方案；只有可选的互动服务（Workers + KV）算半个后端 |
 
 ---
 
@@ -1401,6 +1529,83 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 
 `data-scroll-behavior="smooth"` 也属于同一类问题的另一半 ——
 它不会报错，只是让**每次切页面都平滑滚到顶部**，属于「不崩但体验坏」的静默问题。
+
+### 17.12 为什么浏览量的默认值是「只统计本机」
+
+把 `interactions.provider` 默认设成 `"local"`，而不是直接要求部署一个 Worker，
+理由是**默认状态必须零成本可用**：
+
+| | 默认 `local` | 默认 `remote` |
+| --- | --- | --- |
+| 新克隆一个仓库能不能跑 | ✅ 什么都不用配 | ❌ 得先部署 Worker，否则所有互动请求都失败 |
+| 第三方请求数 | **0** | 每次打开文章都要打一次自家 Worker |
+| 数字是否真实 | ❌ 只是本机的 | ✅ |
+| 界面上是否说谎 | ❌ 标注了「（本机）」 | — |
+
+这里有一条本项目反复出现的判断标准：**默认值决定了这个项目「clone 下来是什么样」。**
+把「需要一个外部部署」的事情设成默认，会让每个想用这个模板的人都先撞一次墙。
+
+同时，标了「（本机）」这三个字是这个取舍能成立的前提 ——
+一个不标注来源的假数字，比没有数字更糟（见 17.5 的同一个道理）。
+
+### 17.13 为什么有封面就不显示正文缩略图
+
+卡片上其实有**两种图片语言**：`cover` 是「这张卡的皮肤」，正文缩略图是
+「这篇里有几张图」。两种都显示会变成一张卡片里堆两组图片，视觉上互相打架，
+而且缩略图会盖在封面图上半透明地悬着，谁都不是主角。
+
+所以做成**互斥**：
+
+| 有 `cover` | 卡片表现 |
+| --- | --- |
+| ✅ | 整卡是封面背景 + 深色渐变，标题压在下半部分；不显示缩略图带 |
+| ❌ | 白卡片；底部一条 1–4 张的缩略图带 |
+
+想让某张正文图片当背景，就把它填进 `cover` —— 这也正是「缩略框可以指定图片作为背景」
+这个需求的实现方式，不需要再发明一个字段。
+
+被否决的方案：**两个都显示**（乱）、**加一个开关字段**（为了一个视觉问题
+增加一个 frontmatter 字段不划算）、**封面只当小缩略图**（那就浪费了「背景」这个更强的表达）。
+
+### 17.14 为什么图片地址要收敛到一个 `resolveImageSrc()`
+
+`basePath` 这件事在本项目已经踩过一次（7.6：手写的原生 `<a>` 不经过组件映射，
+子路径部署时 404）。图片是**同一个坑的另一个入口**：
+
+- MDX 正文的图 → 走 `mdx-components.tsx` 的 `MdxImage`
+- 列表页卡片的缩略图 → 走 `posts.ts` 的 `extractImages()`
+- frontmatter 的封面 → 走 `readPostFile()`
+
+三处都要把 `/uploads/x.jpg` 变成 `/<basePath>/uploads/x.jpg`。
+如果各写各的，就会出现**「正文里的图好好的，列表页缩略图 404」**——
+而且只在子路径构建时才暴露，本地 `npm run dev` 永远看不出来。
+
+所以三者统一走 `src/lib/site.ts` 的 `resolveImageSrc()`，
+它放在 `site.ts`（而不是 `posts.ts`）是因为那是个客户端安全的模块，
+`mdx-components.tsx` 也能安全引用，不会把 `node:fs` 拖进浏览器 bundle。
+
+这条经验其实和 7.5、7.6 是同一条：**同一个语义只能有一个实现，
+尤其当它的正确性依赖于部署方式时。**
+
+### 17.15 为什么互动服务的写操作不能「静默失败」
+
+浏览量/点赞这类**读**操作失败时静默退化是对的：没部署、断网、
+被 CORS 挡，用户不该看到任何报错，数字降级成本机即可。
+
+但**写**操作（发表评论、回复、删除）必须把原因说出来，因为它的失败模式
+有两种完全不同的原因，而前端看到的都是「HTTP 不是 2xx」：
+
+- 没部署互动服务（配置写错了）
+- 部署了，但 token 没有仓库写权限 → 服务端 403
+
+第一版实现里 `fetchJson` 对非 2xx 一律返回 `null`，
+于是站长会看到「回复没生效」，但完全不知道为什么 —— 这正是
+AI_CONTEXT 里记着的那类「安静地不工作」的问题。
+改成 `postJson` 返回 `{ ok, data } | { ok, error }` 之后，
+`403 只有站长可以回复或删除评论` 和 `503 站长身份校验暂时不可用`
+能原样显示给站长。
+
+**教训**：读操作可以宽容，写操作必须解释。
 </p>
 
 ---
@@ -1409,19 +1614,20 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 
 按「投入产出比」排序：
 
-1. **文章封面图** — `cover` 字段已经预留，缺的是卡片样式
-2. **阅读量统计** — Cloudflare Workers + D1，需要开始引入后端概念
-3. **Pagefind 搜索** — 文章上百篇之后替换现在的自建索引（见 17.6）
-4. **图片构建期优化** — 等仓库里真的有大量配图再说（见 17.10）
+1. **图片构建期优化** — 列表页缩略图目前是原图缩放显示。等配图多起来，
+   用 `sharp` 在构建期生成多尺寸 WebP 是收益最大的一步（仍然不需要后端，见 17.10）
+2. **Pagefind 搜索** — 文章上百篇之后替换现在的自建索引（见 17.6）
+3. **精确的阅读量** — 把互动服务的 KV 换成 D1，拿到事务与 SQL 聚合
+4. **OG 图片自动生成** — `next/og` 在构建期为每篇文章生成分享图
+   （有 `cover` 之后这件事变得简单了：直接拿封面当分享图也行）
 5. **代码块行号 / 行高亮** — 需要 Turbopack 支持传递函数型插件选项
-6. **OG 图片自动生成** — `next/og` 在构建期为每篇文章生成分享图
+6. **互动服务的限流与防刷** — 现在 `/hit` 谁都能调（10.7）
 7. **多语言** — 目前没有需求，且会显著增加内容维护成本
 
 已完成、曾经列在这里的：
 ~~Giscus 评论~~（第十节）、~~站点默认值存仓库~~（第十二章）、
-~~代码块语法高亮~~ / ~~数学公式~~（第七节）。
-
-已完成、曾经列在这里的：~~Giscus 评论~~（第十节）、~~站点默认值存仓库~~（第十二章）。
+~~代码块语法高亮~~ / ~~数学公式~~（第七节）、
+~~文章封面图~~（6.1 / 17.13）、~~阅读量统计~~（10.7，以「本机 / 自建 Worker」两档落地）。
 
 ---
 
@@ -1433,8 +1639,8 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 | --- | --- |
 | `tsc --noEmit` | 通过 |
 | `eslint .` | 0 error / 0 warning |
-| `next build` | 通过，**0 警告**，29 个页面 |
-| `next build` 后 `out/tags/` | 13 个目录，**全部 ASCII** |
+| `next build` | 通过，**0 警告**，29 条路由 |
+| `next build` 后 `out/tags/` | 目录名**全部 ASCII**（另有 Next 自己的 `__next.tags/__PAGE__.txt`，不是标签目录，不参与匹配） |
 | `next build`（`NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog`） | 通过，站内链接全部带上前缀（手写 `<a>` 除外，已改为 Markdown 语法） |
 
 > 构建警告曾经出现过一次：把 `SITE_SETTINGS_PATH` 变量传进 `path.join`，
@@ -1445,8 +1651,8 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 
 | 检查项 | 结果 |
 | --- | --- |
-| HTML 页面 | 26 个（另有 `rss.xml` / `search-index.json`） |
-| CSS | 86.5KB（其中 KaTeX 样式 24KB） |
+| HTML 页面 | 27 个（12 篇标签页 + 5 篇文章 + 11 个固定页面，含 `404` / `admin`；另有 `rss.xml` / `search-index.json`） |
+| CSS | 90.8KB（其中 KaTeX 样式 24KB；互动层是纯组件，没有引入任何新 CSS 依赖） |
 | KaTeX 字体 | 20 个 woff2 / 254KB，只在实际渲染公式的页面下载 |
 | `out/search-index.json` | 5 篇 / 20.9KB；dev 下 6 篇（含草稿），生产排除草稿 |
 | 构建耗时 | 约 15 秒（引入 Shiki 前约 3 秒） |
@@ -1471,8 +1677,14 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 | **标签页（冷缓存）** | 清空 `.next` 后 14 个标签 × 3 轮 | 42/42 全部 200（修复前：中文标签首访必然 500） |
 | **静态托管的路径解码行为** | 用「解码路径」和「按原始字节匹配」两个服务器分别跑 `out/` | 所有 ASCII slug 标签页都是 200 —— 中文 URL 方案做不到这一点 |
 | **slug 撞车检查** | 构造两个会算出同一 slug 的标签 | 构建期 `throw`，不是静默合并 |
+| **封面图 / 正文缩略图** | 仓库里留了两篇自检文章（`image-cover-demo` 带 `cover`、`image-thumbnails-demo` 不带）+ 6 张由 `scripts/make-demo-images.py` 生成的示例图；构建后按 `<article>` 切开、切掉 RSC 数据，逐张卡片检查 | 13/13 通过：封面卡片是背景图且渲染 0 张缩略图、右上角标出「文中 4 张图」；无封面卡片渲染 3 张 4:3 裁切的缩略图且没有背景图；文章页渲染 cover 大图 + 全部 5 张配图；6 张图都在 `out/uploads/`。**验收完这些 fixture 可以整组删掉** |
+| **公开留言与站长回复** | 在产物 DOM 里找文案 | 3 条留言都在；带「站长」徽标；`花城<!-- --> 回复` 与回复正文都在 |
+| **文章页互动 UI** | 检查 `out/posts/hello-world/index.html` | 有评论区标题、评论输入框、「浏览与点赞统计加载中」占位、互动服务指引文案 |
+| **互动纯函数** | `node --experimental-strip-types` 直接 import `interactions.ts`（它零 import） | 8/8 通过：ASCII slug 原样、中文 slug 转可行十六进制且 ≤160、超长不越界、按 id 去重且仓库优先、时间正序、脏数据丢弃、本机上限裁剪、内容截断与昵称兜底 |
+| **互动文件读取器** | 临时改写 `content/guestbook.json` 后调 `readGuestbook()`，`finally` 还原 | 8/8 通过：正常 3 条、非法 JSON→空数组、带 BOM 可解析、类型不对→空数组、逐条清洗（空昵称/非法 likes/缺时间都有兜底）、**原文件按字节还原** |
+| Worker（互动服务） | 仓库外临时目录用假 KV + 打桩 GitHub 跑真实 Worker 代码 | 121 项断言全过：CORS 预检逐项、点赞去重/幂等、**非站长 replyTo/deleteId/owner 一律 403 且 KV 零写入**、GitHub 5xx/超时/限流一律 503、path 与长度边界、32KB 边界、第 501 条评论 400、KV 脏数据退回默认值不 500 |
 
-### 四个修掉的 bug
+### 三个修掉的 bug
 
 | bug | 现象 | 根因 |
 | --- | --- | --- |
@@ -1480,10 +1692,13 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 | 站点设置带 BOM 被静默忽略 | 改了 JSON 但站点没变 | `JSON.parse` 遇到 `\uFEFF` 直接抛错，被 catch 吞掉后回退默认值（见 12.4） |
 | MDX 站内链接漏 `basePath` | 子路径部署时 404 | 手写的原生 `<a>` **不经过** `useMDXComponents` 映射（见 7.6） |
 | 中文标签页 dev 反复 500 | 同一个 URL 时好时坏 | `generateStaticParams()` 的值与 URL 里已编码的路径段永远不相等；`.next` 缓存掩盖了必然性（见 7.5） |
+| 互动写操作失败「不说原因」 | 站长点回复没反应，也不知道为什么 | `fetchJson` 对非 2xx 一律返回 `null`，把 `403 不是站长` 和「没部署」混成了一件事（见 17.15） |
+| MDX 正文图片漏 `basePath` | 子路径部署时正文的图 404 | `MdxImage` 直接用了原始 `src`，没走 `resolveImageSrc()`（见 17.14） |
 
-四个都属于**不写针对性验证就发现不了**的类型：
+都属于**不写针对性验证就发现不了**的类型：
 第一个只在桌面端复现，第二个只在文件带 BOM 时复现，
-第三个只在子路径构建时才暴露 —— 而界面上都表现为「安静地不工作」。
+第三个和第六个只在子路径构建时才暴露，
+第五个只有拿错 token 去点回复才会遇到 —— 而界面上都表现为「安静地不工作」。
 
 ### 自己复现
 
@@ -1495,7 +1710,8 @@ npx serve out          # 或 python -m http.server -d out 8080
 重点看：刷新文章页是否 404（`trailingSlash`）、`/rss.xml` 是不是 XML、
 `/search-index.json` 的 `count` 对不对、代码块有没有颜色、
 深浅色切换时代码配色是否跟着变、公式是否正常渲染、
-侧栏播放器能不能出声并切换三种模式、桌面端点留言区的 × 会不会收起。
+侧栏播放器能不能出声并切换三种模式、桌面端点留言区的 × 会不会收起、
+**留言板里那 3 条公开留言在不在**、**文章顶部的浏览占位与底部评论区在不在**。
 
 纯函数可以脱离浏览器直接验证（Node 22 自带类型擦除）：
 
@@ -1504,6 +1720,12 @@ node --experimental-strip-types your-test.mjs   # import "./src/lib/search.ts"
 ```
 
 > 注意 `src/lib/*.ts` 里用了 `@/` 别名，Node 解析不了 ——
-> 能这样直接跑的只有 `search.ts` 这种不 import 别名的文件。
+> 能这样直接跑的只有不 import 别名、或只用 `import type` 的文件。
+> `search.ts` 属于前者，`interactions.ts` 属于「零 import」，
+> `interactions-file.ts` 属于「只有 type-only import」，三者都可以直接跑。
+
+**验产物时别用 PowerShell 的行内中文**（中文过 `pwsh -Command` 会被转坏，
+匹配静默失败），也别忘了 `out/**.html` 末尾那段 RSC 数据里含有原始 props ——
+详见 AI_CONTEXT 的「踩过的坑」第 8、9 条。
 
 

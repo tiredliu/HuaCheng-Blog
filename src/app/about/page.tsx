@@ -21,7 +21,7 @@ const STACK = [
   { layer: "内容格式", tech: "MDX", version: "—", note: "Markdown 里嵌 React 组件" },
   { layer: "代码高亮", tech: "Shiki", version: "4", note: "构建期着色，双主题零运行时" },
   { layer: "数学公式", tech: "KaTeX", version: "0.19", note: "构建期渲染，字体按需加载" },
-  { layer: "评论", tech: "Giscus", version: "—", note: "基于 GitHub Discussions，可选启用" },
+  { layer: "评论", tech: "本机 / 互动服务 / Giscus", version: "—", note: "默认零配置；全站公开评论需要部署一个可选 Worker" },
   { layer: "托管", tech: "Cloudflare Pages", version: "—", note: "全球 CDN，国内速度较好" },
   { layer: "视频", tech: "Bilibili iframe", version: "—", note: "国内可直接播放，免流量" },
 ];
@@ -32,15 +32,17 @@ const CAPABILITIES = [
   { name: "国内访问速度", done: true, note: "Cloudflare CDN + 无外链字体与外链 JS" },
   { name: "代码高亮 / 公式", done: true, note: "Shiki 双主题 + KaTeX，都在构建期完成" },
   { name: "站内搜索", done: true, note: "构建期生成索引，支持按时间排序" },
-  { name: "评论系统", done: true, note: "Giscus（GitHub Discussions），配置即启用" },
+  { name: "评论与回复", done: true, note: "评论区 + 留言板；回复只有站长能做，写进仓库对所有人生效" },
+  { name: "浏览量 / 点赞", done: true, note: "默认只统计本机；部署自带的 Cloudflare Worker 后是全站数字" },
   { name: "视频 / 音乐播放", done: true, note: "<BilibiliVideo /> 与侧栏播放器" },
   { name: "标签 / 归档", done: true, note: "标签页、标签详情、年份归档" },
+  { name: "列表页配图", done: true, note: "cover 当卡片背景；没有封面时展示正文前 4 张图的缩略图带" },
   { name: "自定义壁纸", done: true, note: "内置预设 + 直传仓库 + 只存本机" },
   { name: "站点默认值", done: true, note: "存仓库的 JSON，构建期注入，首屏即生效" },
   { name: "深浅色主题", done: true, note: "跟随系统 + 手动切换，内联脚本防闪屏" },
   { name: "图片自动优化", done: false, note: "静态导出下 next/image 优化器不可用，见设计文档" },
-  { name: "阅读量统计", done: false, note: "需要时再加 Cloudflare Workers + D1" },
-  { name: "后端 API", done: false, note: "纯静态方案，暂无 Workers + D1" },
+  { name: "精确的阅读量", done: false, note: "KV 没有事务，要精确得上 D1" },
+  { name: "浏览量的防刷", done: false, note: "个人博客不做这个投入" },
 ];
 
 export default function AboutPage() {

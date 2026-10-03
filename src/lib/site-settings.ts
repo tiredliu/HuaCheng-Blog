@@ -1,3 +1,8 @@
+import {
+  DEFAULT_INTERACTIONS,
+  isInteractionSettings,
+  type InteractionSettings,
+} from "@/lib/interactions";
 import { DEFAULT_WALLPAPER, isWallpaperSettings, type WallpaperSettings } from "@/lib/wallpaper";
 
 /**
@@ -48,6 +53,14 @@ export interface SiteSettings {
   messageOpen: boolean;
   wallpaper: WallpaperSettings;
   giscus: GiscusConfig | null;
+  /**
+   * 浏览量 / 点赞 / 评论的后端。
+   *
+   * 默认 `local`：零配置，只统计访客自己的浏览器；
+   * 改成 `remote` 并填上 `apiBase` 之后才是全局数字
+   * （后端源码在 `workers/blog-api/`，部署一次即可）。
+   */
+  interactions: InteractionSettings;
   /** 上次保存时间，仅用于界面提示 */
   updatedAt?: string;
 }
@@ -63,6 +76,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   messageOpen: false,
   wallpaper: DEFAULT_WALLPAPER,
   giscus: null,
+  interactions: DEFAULT_INTERACTIONS,
 };
 
 export const SIDEBAR_MIN_WIDTH = 220;
@@ -122,6 +136,9 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
       ? (raw.wallpaper as WallpaperSettings)
       : DEFAULT_WALLPAPER,
     giscus: isGiscusConfig(raw.giscus) ? raw.giscus : null,
+    interactions: isInteractionSettings(raw.interactions)
+      ? (raw.interactions as InteractionSettings)
+      : DEFAULT_INTERACTIONS,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
   };
 }
@@ -140,6 +157,7 @@ export function serializeSiteSettings(settings: SiteSettings): string {
       messageOpen: settings.messageOpen,
       wallpaper: settings.wallpaper,
       giscus: settings.giscus,
+      interactions: settings.interactions,
       updatedAt: settings.updatedAt,
     },
     null,
@@ -158,6 +176,8 @@ export function diffSiteSettings(current: SiteSettings, saved: SiteSettings): st
   if (current.messageOpen !== saved.messageOpen) changed.push("留言区展开状态");
   if (JSON.stringify(current.wallpaper) !== JSON.stringify(saved.wallpaper)) changed.push("壁纸");
   if (JSON.stringify(current.giscus) !== JSON.stringify(saved.giscus)) changed.push("评论配置");
+  if (JSON.stringify(current.interactions) !== JSON.stringify(saved.interactions))
+    changed.push("互动统计后端");
   return changed;
 }
 

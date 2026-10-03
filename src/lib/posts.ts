@@ -15,6 +15,13 @@ export interface PostMeta {
   summary: string;
   tags: string[];
   cover?: string;
+  /**
+   * 正文里插入的图片（最多 4 张，路径已补上 basePath）。
+   *
+   * 列表页的缩略框用它展示「这篇文章里有哪些图」；
+   * frontmatter 里的 `cover` 则用来当整张卡片的背景图。
+   */
+  images: string[];
   author: string;
   draft: boolean;
   /**
@@ -39,8 +46,61 @@ export interface TocItem {
 }
 
 export { SITE } from "@/lib/site";
-import { SITE } from "@/lib/site";
+import { SITE, resolveImageSrc } from "@/lib/site";
 import { buildSlugToTagMap, findTagSlugCollisions, tagToSlug } from "@/lib/tag-slug";
+
+/** 正文里最多为列表页取几张缩略图 */
+const CARD_IMAGE_LIMIT = 4;
+
+/** 去掉代码块与行内代码：示例代码里的图片地址不算「文章里插了图」 */
+function stripCode(source: string): string {
+  return source
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/~~~[\s\S]*?~~~/g, " ")
+    .replace(/`[^`\n]*`/g, " ");
+}
+
+/**
+ * 从 MDX 正文里提取插入的图片（构建期执行）。
+ *
+ * 支持的两种写法：
+ * - Markdown：`![说明](/uploads/x.jpg)`
+ * - 原生标签：`<img src="/uploads/x.jpg" />`
+ *
+ * 刻意**跳过 data URL 与相对路径**：前者会让卡片背上几百 KB 的 base64，
+ * 后者在列表页（URL 层级不同）会解析到错误的位置。
+ * 地址的规整统一走 `resolveImageSrc()`，和正文里的 `<img>` 完全一致。
+ */
+export function extractImages(source: string, limit = CARD_IMAGE_LIMIT): string[] {
+  const text = stripCode(source);
+  const found: string[] = [];
+
+  const patterns = [
+    // ![说明](/uploads/x.jpg "可选标题")
+    /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
+    // <img src="/uploads/x.jpg" …>
+    /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi,
+  ];
+
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const src = resolveImageSrc(match[1]);
+      if (!src || src.startsWith("data:")) continue;
+
+      // 相对路径在列表页会解析错位置，直接跳过
+      const isAbsolute = src.startsWith("/") || /^(https?:)?\/\//i.test(src);
+      if (!isAbsolute) continue;
+      if (found.includes(src)) continue;
+
+      found.push(src);
+      if (found.length >= limit) return found;
+    }
+  }
+
+  return found;
+}
 
 /** 把 frontmatter 的任意写法统一成字符串数组 */
 function normalizeTags(value: unknown): string[] {
@@ -85,6 +145,7 @@ function readPostFile(fileName: string): Post {
   const raw = fs.readFileSync(path.join(POSTS_DIR, fileName), "utf8");
   const { data, content } = matter(raw);
   const stat = fs.statSync(path.join(POSTS_DIR, fileName));
+  const cover = resolveImageSrc(data.cover);
 
   return {
     slug,
@@ -95,7 +156,8 @@ function readPostFile(fileName: string): Post {
         ? data.summary.trim()
         : buildSummary(content),
     tags: normalizeTags(data.tags),
-    cover: typeof data.cover === "string" ? data.cover : undefined,
+    ...(cover && !cover.startsWith("data:") ? { cover } : {}),
+    images: extractImages(content),
     author: typeof data.author === "string" && data.author.trim() ? data.author.trim() : SITE.author,
     draft: data.draft === true,
     wordCount: countWords(content),

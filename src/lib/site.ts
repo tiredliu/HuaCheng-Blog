@@ -7,13 +7,13 @@
 export const SITE = {
   name: "花城博客",
   shortName: "花城",
-  description: "记录技术与生活 —— 一名前端工程师的写作空间",
+  description: "记录技术与生活 —— 一名开发者的写作空间",
   author: "花城",
-  email: "huacheng@example.com",
-  location: "广东 · 广州",
+  email: "1325882743@qq.com",
+  location: "湖南 · 衡阳",
   url: "https://hua-cheng-blog.pages.dev",
-  repository: "https://github.com/hua-cheng/hua-cheng-blog",
-  startYear: 2024,
+  repository: "https://github.com/tiredliu/HuaCheng-Blog",
+  startYear: 2026,
   /**
    * 头像与分享图，都是仓库里的静态文件（`public/` 下）。
    * 换头像只要替换 `public/avatar.png`，不用改代码。
@@ -43,5 +43,24 @@ export const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/
 /** 拼接站内静态资源路径，自动带上 basePath */
 export function withBasePath(pathname: string): string {
   return `${BASE_PATH}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+}
+
+/**
+ * 把图片地址规整成浏览器真的能取到的地址。
+ *
+ * - `/uploads/x.jpg`（站内绝对路径）→ 补上 `basePath`
+ * - `https://…` / `//…`（外链）→ 原样返回
+ * - `data:` / 相对路径 → 原样返回，交给调用方自己决定要不要用
+ *
+ * ⚠️ 文章正文的 `<img>`、列表页的缩略图、frontmatter 的封面图
+ * **必须都走这一个函数**，否则子路径部署时会出现
+ * 「正文里好好的，列表页缩略图 404」这种很难查的不一致。
+ */
+export function resolveImageSrc(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const src = value.trim();
+  if (!src) return null;
+  if (src.startsWith("/")) return withBasePath(src);
+  return src;
 }
 

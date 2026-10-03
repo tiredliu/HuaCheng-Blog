@@ -1,0 +1,48 @@
+# 花城博客 · 互动 API（Cloudflare Worker）
+#
+# 这个 Worker 是**可选**的：博客前端默认走浏览器 localStorage，
+# 只有站长部署了它、并把地址填进 content/site-settings.json 的
+# interactions.apiBase 之后，前端才会调用它。
+#
+# 完整部署步骤见同目录 README.md。
+
+name = "hc-blog-api"
+main = "src/index.js"
+
+# 2025 年的兼容性日期：锁定 Workers 运行时行为，
+# 避免以后运行时默认行为变化影响线上。
+compatibility_date = "2025-06-01"
+
+[vars]
+# 用来校验「我是仓库主人」的仓库。
+# 站长平时那个 GitHub fine-grained PAT 只授权这个仓库、只给
+# Contents: Read and write 就够了（Worker 读的是仓库详情里的 permissions.push）。
+GH_OWNER = "tiredliu"
+GH_REPO = "HuaCheng-Blog"
+
+# 允许跨域的来源。默认 "*"：纯静态博客可能部署在任意域名 /
+# 本地预览端口，所以默认放开。
+# 如果要限制只允许自己的域名跨域，把 ALLOWED_ORIGIN 改成 "https://你的域名"。
+ALLOWED_ORIGIN = "*"
+
+# ---------------------------------------------------------------
+# KV 绑定：binding 名必须是 BLOG_KV，代码里写死了这个名字。
+#
+# ⚠️ 下面这段故意保持注释状态：namespace 的 id 只能由你先跑一次命令生成，
+#    把真实 id 填进来再取消注释。这里不放假的 id，
+#    否则 `wrangler deploy` 会因为绑定不存在 / id 无效而直接失败。
+#
+# 第一步（只在第一次部署时做一遍）：
+#   wrangler kv namespace create BLOG_KV
+#
+# 它会输出类似下面这一段（id 是例子，别照抄）：
+#   [[kv_namespaces]]
+#   binding = "BLOG_KV"
+#   id = "0123456789abcdef0123456789abcdef"
+#
+# 第二步：把上面输出的 id 填进下面、并取消注释，然后 wrangler deploy：
+#
+# [[kv_namespaces]]
+# binding = "BLOG_KV"
+# id = "<把 wrangler kv namespace create 输出的真实 id 填在这里>"
+# ---------------------------------------------------------------
