@@ -1,0 +1,66 @@
+{
+  // ───────────────────────────────────────────────────────────────────────
+  // 打前缀 + Tab 就能展开。这样日常写作里就不需要记那些「像代码」的写法了。
+  // 新增片段就往这个文件里加一条。
+  // ───────────────────────────────────────────────────────────────────────
+
+  "新建文章（frontmatter 骨架）": {
+    "scope": "markdown,mdx",
+    "prefix": "post",
+    "body": [
+      "---",
+      "title: ${1:文章标题}",
+      "date: ${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}",
+      "tags: [${2:标签}]",
+      "summary: ${3:一句话摘要，会显示在列表页}",
+      "draft: false",
+      "---",
+      "",
+      "## ${4:小标题}",
+      "",
+      "$0"
+    ],
+    "description": "文章骨架。想先写草稿就把 draft 改成 true —— 那样只在本机 npm run dev 可见，不会出现在线上"
+  },
+
+  "提示框 Callout": {
+    "scope": "markdown,mdx",
+    "prefix": "callout",
+    "body": [
+      "<Callout type=\"${1|tip,info,warning,danger|}\" title=\"${2:标题}\">",
+      "${3:内容}",
+      "</Callout>"
+    ],
+    "description": "带样式的提示框（type 可选 tip / info / warning / danger）"
+  },
+
+  "B 站视频": {
+    "scope": "markdown,mdx",
+    "prefix": "bili",
+    "body": ["<BilibiliVideo bvid=\"${1:BV1xx411c7mD}\" title=\"${2:说明}\" />"],
+    "description": "B 站视频嵌入，iframe 懒加载"
+  },
+
+  "音频播放器": {
+    "scope": "markdown,mdx",
+    "prefix": "audio",
+    "body": [
+      "<AudioPlayer src=\"/uploads/${1:文件名.mp3}\" title=\"${2:曲名}\" artist=\"${3:作者}\" />"
+    ],
+    "description": "文章内的单曲播放器"
+  },
+
+  "插入图片": {
+    "scope": "markdown,mdx",
+    "prefix": "img",
+    "body": ["![${1:说明}](/uploads/${2:文件名.jpg})"],
+    "description": "站内图片。把文件放进 public/uploads/ 即可（路径里的 public 可以省略，两种写法都认）"
+  },
+
+  "行间公式": {
+    "scope": "markdown,mdx",
+    "prefix": "math",
+    "body": ["$$", "${1:公式}", "$$"],
+    "description": "行间数学公式（KaTeX）。行内公式直接写 $E = mc^2$"
+  }
+}

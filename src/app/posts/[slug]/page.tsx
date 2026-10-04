@@ -57,8 +57,28 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const post = getPostBySlug(slug);
   if (!post) notFound();
 
-  // @next/mdx：把 content/posts/*.mdx 编译成 React 组件
-  const { default: Post } = await import(`@/content/posts/${slug}.mdx`);
+  /**
+   * @next/mdx：把 content/posts 下的文章编译成 React 组件。
+   *
+   * 这里 import 的是 `fileName`（**含扩展名**，来自 `readdirSync`），
+   * 所以 `.md` 和 `.mdx` 用同一行代码就够了 —— 不需要按扩展名分支。
+   *
+   * ⚠️ **不要「优化」成 `content/posts/${slug}.mdx` 或按扩展名分两个分支。**
+   * Turbopack 会为模板字面量生成一个「上下文模块」，把匹配到的一批文件一起打包；
+   * 而这个上下文**不能为空**。曾经写成两个分支：
+   *
+   *   post.fileName.endsWith(".md")
+   *     ? import(`@/content/posts/${slug}.md`)     // ← 仓库里一篇 .md 都没有时
+   *     : import(`@/content/posts/${slug}.mdx`)    //    Turbopack 直接报
+   *                                                //   "Can't resolve '@/content/posts/' <dynamic> '.md'"
+   *
+   * 也就是说，那种写法会让「仓库里至少得有一篇 .md 文章」变成一条隐式硬约束 ——
+   * 把唯一的 `.md` 文章删掉，或者改成 `.mdx`，构建就挂了。
+   *
+   * 用 `${fileName}`（一个插值、glob 是 `content/posts/*`）就没有这个问题：
+   * 只要还有任何一篇文章，上下文就非空。
+   */
+  const { default: Post } = await import(`@/content/posts/${post.fileName}`);
 
   const toc = extractToc(post.source);
   const { previous, next } = getAdjacentPosts(slug);

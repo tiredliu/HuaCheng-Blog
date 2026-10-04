@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "cross-env TINA_PUBLIC_IS_LOCAL=true node scripts/tina.mjs dev -c \"next dev\"",
     "dev:next": "next dev",
+    "new": "node scripts/new-post.mjs",
     "build": "node scripts/tina.mjs build && next build",
     "build:cms": "node scripts/tina.mjs build",
     "build:app": "next build",

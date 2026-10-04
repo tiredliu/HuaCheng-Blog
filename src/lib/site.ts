@@ -48,9 +48,17 @@ export function withBasePath(pathname: string): string {
 /**
  * 把图片地址规整成浏览器真的能取到的地址。
  *
- * - `/uploads/x.jpg`（站内绝对路径）→ 补上 `basePath`
- * - `https://…` / `//…`（外链）→ 原样返回
- * - `data:` / 相对路径 → 原样返回，交给调用方自己决定要不要用
+ * 除了补 `basePath`，这里还负责**容忍各种编辑器插入的写法** ——
+ * 「图片显示不出来」最常见的两个原因，就是路径里多了 / 少了 `public`，
+ * 以及 Windows 上插进来的是反斜杠。
+ *
+ * | 输入的写法 | 规整成 |
+ * | --- | --- |
+ * | `/uploads/x.jpg` | `/uploads/x.jpg`（带 basePath） |
+ * | `public/uploads/x.jpg` | 同上 —— `public/` 就是站点的根目录 |
+ * | `./public\uploads\x.jpg` | 同上（`./` 与反斜杠都会先被清理） |
+ * | `uploads/x.jpg` | 同上（上传目录的前导斜杠可以省） |
+ * | `https://…` / `data:…` / 其它 | 原样返回 |
  *
  * ⚠️ 文章正文的 `<img>`、列表页的缩略图、frontmatter 的封面图
  * **必须都走这一个函数**，否则子路径部署时会出现
@@ -58,9 +66,26 @@ export function withBasePath(pathname: string): string {
  */
 export function resolveImageSrc(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const src = value.trim();
+
+  // Windows 上的编辑器可能插入反斜杠；URL 里不存在合法的反斜杠路径
+  let src = value.trim().replace(/\\/g, "/");
   if (!src) return null;
+
+  if (src.startsWith("./")) src = src.slice(2);
+
+  // `public/` 是 Next 的静态目录，也就是站点的根
+  if (src.startsWith("/public/")) src = src.slice("/public".length);
+  else if (src.startsWith("public/")) src = `/${src.slice("public/".length)}`;
+
+  // 协议相对地址（`//example.com/a.png`）也是外链，不能当站内路径加前缀 ——
+  // 否则会拼成 `/base//example.com/a.png` 这种取不到的地址。
+  if (src.startsWith("//")) return src;
+
   if (src.startsWith("/")) return withBasePath(src);
+
+  // 只省略了前导斜杠的上传路径
+  if (src.startsWith("uploads/")) return withBasePath(`/${src}`);
+
   return src;
 }
 

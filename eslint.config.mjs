@@ -18,6 +18,19 @@ const eslintConfig = defineConfig([
     "public/uploads/**",
     // 独立部署的 Cloudflare Worker：不在 Next 的构建里，也不该走 Next 的规则
     "workers/**",
+    /**
+     * 本地写作工具（Obsidian / Typora）留下的目录。
+     *
+     * Obsidian 把配置建在「仓库」根目录，如果仓库开在 content/posts，
+     * 就会出现 content/posts/.obsidian/。里面的社区插件是**第三方压缩过的 JS**
+     * （实测某个插件单文件 2.4MB），ESLint 读它会直接崩：
+     *
+     *   RangeError: Invalid string length
+     *     at text-table.js  ← 它想把那一行塞进终端表格
+     *
+     * 这些文件既不是我们的代码，也不该进版本库（.gitignore 已忽略）。
+     */
+    "**/.obsidian/**",
   ]),
   {
     rules: {

@@ -96,7 +96,7 @@
 ```text
 构建期（next build，跑在 Node 里）                 运行期（用户浏览器）
 ─────────────────────────────────────         ─────────────────────────
-读 content/posts/*.mdx                         接收 CDN 发来的静态 HTML
+读 content/posts/*.md(x)                       接收 CDN 发来的静态 HTML
   ↓ gray-matter 解析 frontmatter                  ↓
   ↓ 过滤 draft                                   下载 _next/static 下的 JS/CSS
   ↓ 计算阅读时长 / 目录 / 相关文章                  ↓
@@ -115,7 +115,7 @@
 
 ```text
                  ┌──────────────────────────────┐
-                 │  content/posts/*.mdx          │  ← 唯一的真相来源
+                 │  content/posts/*.md(x)        │  ← 唯一的真相来源
                  │  （frontmatter + 正文）        │
                  └───────────┬──────────────────┘
                              │
@@ -239,7 +239,7 @@ hua-cheng-blog/
 │   └── mdx-components.tsx            MDX 全局组件注册（Next 约定文件）
 │
 ├── content/
-│   ├── posts/*.mdx                   文章本体
+│   ├── posts/*.md(x)                 文章本体（.md 与 .mdx 等价）
 │   ├── guestbook.json                ★ 站长发布的公开留言
 │   ├── comments.json                 ★ 站长发布的公开评论与回复
 │   └── site-settings.json            ★ 站点默认设置（可提交、可在线改）
@@ -268,7 +268,8 @@ hua-cheng-blog/
 
 ### 6.1 frontmatter 字段
 
-`content/posts/*.mdx` 的 YAML 头，由 `src/lib/posts.ts` 读取：
+`content/posts/*.md(x)` 的 YAML 头，由 `src/lib/posts.ts` 读取。
+**`.md` 与 `.mdx` 等价**（见 7.1）：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -313,7 +314,7 @@ const includeDrafts = options.includeDrafts ?? process.env.NODE_ENV !== "product
 ### 7.1 编译链路
 
 ```text
-content/posts/hello-world.mdx
+content/posts/hello-world.md(x)      ← .md 和 .mdx 走同一条路
       │
       │  @next/mdx（Turbopack loader）
       ├── remark-frontmatter   去掉 YAML 头（否则会被当成正文渲染）
@@ -322,9 +323,41 @@ content/posts/hello-world.mdx
       ↓
 React 组件
       ↓  src/app/posts/[slug]/page.tsx
-      │  const { default: Post } = await import(`@/content/posts/${slug}.mdx`)
+      │  await import(`@/content/posts/${post.fileName}`)   ← fileName 含扩展名
       ↓
 <MdxContent><Post /></MdxContent>      套上 .article 排版
+```
+
+#### 让 `.md` 也能用，需要两处配置，缺一不可
+
+这两条都在 `next.config.ts`，而且**都是「不配会静默出事」的类型**：
+
+| 配置 | 不配会怎样 |
+| --- | --- |
+| `extension: /\.mdx?$/` | `@next/mdx` 默认只匹配 `.mdx`。`.md` 文件没有任何 loader 处理，Turbopack 直接报错：`Unknown module type`（**构建失败**，还好，是响的） |
+| `options.format: "mdx"` | ⚠️ **这条最阴。** MDX 的 `format` 默认是 `'detect'` —— 按扩展名猜：扩展名在 `mdExtensions`（`.md` / `.markdown` / `.txt`…）里就按**纯 Markdown** 编译。于是 `.md` 里的 JSX 被**静默丢掉**： |
+
+`format` 缺失时的实测结果（同一份内容，只换扩展名）：
+
+| 内容 | `.md`（format 未设） | `.mdx` | `.md`（设了 `format: 'mdx'`） |
+| --- | --- | --- | --- |
+| `{1 + 1}` | **原样输出 `{1 + 1}`** | `2` | `2` ✅ |
+| `<Callout title="x">内容</Callout>` | **标签消失，只剩「内容」** | 渲染成提示框 | 渲染成提示框 ✅ |
+
+「标签消失、内容还在」意味着**页面看起来没错，只是样式没了** ——
+作者很可能几个月都发现不了。所以这一行不是为了「支持 `.md`」才加的，
+而是为了让两种扩展名的行为**完全一致**：不一致本身就是 bug。
+
+配置依据来自 `@mdx-js/mdx` 的源码与类型：
+
+```js
+// @mdx-js/mdx/lib/util/resolve-file-and-options.js
+format: format === 'md' || format === 'mdx'
+  ? format
+  : file.extname && (rest.mdExtensions || md).includes(file.extname) ? 'md' : 'mdx'
+
+// @mdx-js/mdx/lib/compile.d.ts
+format?: "detect" | "md" | "mdx" | null | undefined;   // 默认 'detect'
 ```
 
 **注意**：Turbopack 下 remark/rehype 插件只能用**「字符串名 + 可序列化选项」**传递，
@@ -339,7 +372,7 @@ React 组件
 用的是 Shiki。核心决策是**在构建期就把颜色算好**：
 
 ```text
-content/posts/*.mdx
+content/posts/*.md(x)
       ↓ remark-mdx / mdast
       ↓ @shikijs/rehype        ← 在这里上色
    out/posts/xxx/index.html    ← 已经带颜色了
@@ -493,7 +526,7 @@ Markdown 链接输出 `/hua-cheng-blog/posts/foo`，而手写的原生 `<a>` 仍
 ### 8.2 索引怎么生成
 
 ```text
-content/posts/*.mdx
+content/posts/*.md(x)
    ↓ getAllPosts()            （草稿在这一步就被过滤掉）
    ↓ toPlainText()            去掉 Markdown/JSX 语法，保留代码块内容
    ↓ 每篇截断到 6000 字        防止索引无限膨胀
@@ -1225,9 +1258,18 @@ const nextConfig: NextConfig = {
 };
 
 export default createMDX({
+  // ⚠️ 这两行都是为了「.md 和 .mdx 等价」，删掉任何一行都会出事（见 7.1）
+  extension: /\.mdx?$/,      // 默认只匹配 .mdx；不加则 .md 无人处理 → 构建失败
   options: {
-    remarkPlugins: ["remark-frontmatter", "remark-gfm"],
-    rehypePlugins: ["rehype-slug"],
+    format: "mdx",           // 默认 'detect' 会按扩展名把 .md 当纯 Markdown → JSX 被静默丢掉
+    remarkPlugins: ["remark-frontmatter", "remark-gfm", "remark-math"],
+    rehypePlugins: [
+      "rehype-slug",
+      ["@shikijs/rehype", { themes: { light: "github-light", dark: "github-dark" },
+                            defaultColor: false, addLanguageClass: true,
+                            defaultLanguage: "text" }],
+      ["rehype-katex", { output: "html", throwOnError: false, strict: false }],
+    ],
   },
 })(nextConfig);
 ```
@@ -1235,6 +1277,10 @@ export default createMDX({
 **`trailingSlash: true` 的意义**：产物是 `posts/hello-world/index.html`，
 任何静态服务器（含 Cloudflare Pages、GitHub Pages、Nginx）都能直接按目录找到它，
 **不需要写任何 rewrite 规则**。
+
+**`pageExtensions` 里的 `md` / `mdx`** 是为了让 `app/` 目录下也能直接放 `.md` 页面；
+`content/posts/` 不在 `app/` 下，所以它不负责文章的扩展名匹配 —— 那个由上面的
+`extension` 管。两处容易搞混：**`pageExtensions` 管路由，`extension` 管 loader。**
 
 ### 14.2 `src/app/globals.css`
 
@@ -1267,7 +1313,7 @@ Tailwind v4 把配置搬进了 CSS：
 | --- | --- | --- |
 | `TINA_PUBLIC_IS_LOCAL` | 仅本地 | `true` 时用文件系统，不需要 TinaCloud 账号 |
 | `NEXT_PUBLIC_TINA_CLIENT_ID` | 线上 | TinaCloud 项目 ID |
-| `TINA_TOKEN` | 线上 | 读写 token，构建时用于内容索引 |
+| `TINA_TOKEN` | 线上 | **只读** token（Read Only）；写权限来自后台的登录会话，不走这个 token |
 | `GITHUB_BRANCH` | 可选 | 默认 `main` |
 | `NEXT_PUBLIC_BASE_PATH` | 可选 | 子路径部署（GitHub Pages 项目页） |
 
@@ -1606,6 +1652,106 @@ AI_CONTEXT 里记着的那类「安静地不工作」的问题。
 能原样显示给站长。
 
 **教训**：读操作可以宽容，写操作必须解释。
+
+### 17.16 为什么文章要同时接受 `.md` 和 `.mdx`
+
+起因是「怎么让本地写作不像写代码」。换 Typora / Obsidian 时撞上两件事：
+
+| 事实 | 后果 |
+| --- | --- |
+| Typora 和 Obsidian **原生只认 `.md`** | `.mdx` 在 Obsidian 里连文件树都不显示 |
+| Typora 在部分平台**保存时会把 `.mdx` 改名成 `.md`** | 当时文章页的动态 import 写死了 `.mdx`，改名 → **整个构建失败** |
+
+两条都指向同一个结论：**让两种后缀等价**。代价很小（`posts.ts` 加一个
+`fileName` 字段，文章页按扩展名分两个 import 分支），收益是：
+
+- 写作工具可以按自己的脾气来（`.md` / 不改名都不影响）
+- 想用哪个编辑器都行，不用为了工具去迁就文件名
+
+#### 但第一版改法是错的，而且错得很隐蔽
+
+只加 `extension: /\.mdx?$/` 时构建能过、页面能出 —— 看起来完全成了。
+直到做了一次**对照实验**（同一份内容，一份 `.md` 一份 `.mdx`）才发现：
+
+```text
+.md  ：A 表达式：{1 + 1}                    ← 表达式没求值
+       B 单行组件：<!-- -->单行内容           ← <Callout> 标签整个消失
+
+.mdx ：A 表达式：2
+       B 单行组件：<div class="...Callout...">单行标题...单行内容</div>
+```
+
+**「标签消失、内容还在」是最坏的一类失败**：页面不报错、文字也没少，
+只是所有富文本组件变成普通段落。作者大概率几个月都不会发现。
+
+根因在 `@mdx-js/mdx`：`format` 默认是 `'detect'`，而它**按扩展名**猜 ——
+扩展名落在 `mdExtensions`（含 `.md`）里就按纯 Markdown 编译。
+所以必须显式写 `format: 'mdx'`。完整推导见 7.1。
+
+**如果当时没做对照实验，这个改动会以「看起来成功了」的样子进仓库。**
+
+#### 第二个坑：动态 import 的「上下文不能为空」
+
+修好 `format` 之后还有一处。文章页最初是按扩展名分两个分支：
+
+```ts
+post.fileName.endsWith(".md")
+  ? import(`@/content/posts/${slug}.md`)     // ← 这里
+  : import(`@/content/posts/${slug}.mdx`)
+```
+
+Turbopack 会为每个模板字面量生成一个「上下文模块」（把匹配到的一批文件一起打包），
+而**这个上下文不能为空**。仓库里一篇 `.md` 都没有时：
+
+```text
+Module not found: Can't resolve '@/content/posts/' <dynamic> '.md'
+```
+
+也就是说那种写法会凭空造出一条隐式硬约束：**仓库里必须至少留一篇 `.md` 文章**。
+把唯一那篇删掉、或者改名成 `.mdx`，构建就挂 —— 而报错信息完全看不出这层因果。
+
+改成一个插值就解决了：
+
+```ts
+const { default: Post } = await import(`@/content/posts/${post.fileName}`);
+```
+
+`fileName` 已经含扩展名（来自 `readdirSync`），glob 是 `content/posts/*`，
+只要还有任何一篇文章上下文就非空。**顺带还少了一层按扩展名分支的逻辑。**
+
+验证过：顶层 0 篇 `.md` 时构建正常，加一篇 `.md` 也正常。
+
+#### 为什么不去掉 `.mdx` 只留 `.md`
+
+也可以（两种后缀现在完全等价），但没必要：
+现有文章全是 `.mdx`，重命名会在 git 历史里制造一堆 rename 记录，
+而收益只是「文件夹里少一种后缀」。**让两种共存，规则更简单：
+怎么写都行，写错了也不会坏。**
+
+#### 顺带发现：Obsidian 的仓库位置是个陷阱
+
+Obsidian 会在「仓库」根目录建 `.obsidian/`。如果把它开在 `content/posts/Blog`，
+会同时踩两个坑：
+
+1. `.obsidian/` 出现在内容目录里（已加进 `.gitignore`）
+2. **子目录里的文章根本不会被扫描** —— `listPostFiles()` 用的是
+   `fs.readdirSync()`（非递归），只认 `content/posts/` 下一层的文件名。
+   在子文件夹里写的文章**一篇都不会出现在站点上，而且不报错**。
+
+正确的开法：**仓库根选 `content/posts` 本身**。这条写进 README 了。
+
+#### 顺带补的一道防线：非 ASCII 文件名让构建失败
+
+支持 `.md` 之后，用 Obsidian 的人会**必然**踩到中文文件名 ——
+它新建笔记的默认名就叫「未命名」，而在 Obsidian 里完全看不出异常。
+
+所以在 `readPostFile()` 里加了一条检查：slug 不是 ASCII 时，
+**构建期直接 `throw`**（信息里带文件名），dev 下只警告。
+和 `findTagSlugCollisions()` 抛错是同一个思路：
+**能提前停下来的错误，就不要留到线上变成「文章悄悄不出现」。**
+
+dev 下不抛是有意的 —— 否则整个开发服务器都会跟着报错，
+一个文件写错名就什么都看不了了。取舍写在 AI_CONTEXT 硬约束 9。
 </p>
 
 ---
@@ -1683,6 +1829,10 @@ AI_CONTEXT 里记着的那类「安静地不工作」的问题。
 | **互动纯函数** | `node --experimental-strip-types` 直接 import `interactions.ts`（它零 import） | 8/8 通过：ASCII slug 原样、中文 slug 转可行十六进制且 ≤160、超长不越界、按 id 去重且仓库优先、时间正序、脏数据丢弃、本机上限裁剪、内容截断与昵称兜底 |
 | **互动文件读取器** | 临时改写 `content/guestbook.json` 后调 `readGuestbook()`，`finally` 还原 | 8/8 通过：正常 3 条、非法 JSON→空数组、带 BOM 可解析、类型不对→空数组、逐条清洗（空昵称/非法 likes/缺时间都有兜底）、**原文件按字节还原** |
 | Worker（互动服务） | 仓库外临时目录用假 KV + 打桩 GitHub 跑真实 Worker 代码 | 121 项断言全过：CORS 预检逐项、点赞去重/幂等、**非站长 replyTo/deleteId/owner 一律 403 且 KV 零写入**、GitHub 5xx/超时/限流一律 503、path 与长度边界、32KB 边界、第 501 条评论 400、KV 脏数据退回默认值不 500 |
+| **`.md` / `.mdx` 等价** | **对照实验**：同一份内容分别存成 `.md` 和 `.mdx`，里面放 `{1 + 1}`、单行 `<Callout>`、带空行的 `<Callout>`，构建后逐项对比两份 HTML | 设 `format: "mdx"` 之后 6 项全部一致（表达式求值、组件标题、组件内容都渲染）；**设之前 `.md` 侧三项失败**：表达式原样输出、Callout 标签消失只剩内容 —— 这就是差点漏掉的 bug |
+| `.md` 的 MDX 能力 | 另建一篇 `.md`，内含 Callout + 代码块 + 行内/行间公式，检查产物 | 13 项里 13 项通过（组件、Shiki 双主题变量、语言标签、KaTeX 行内与行间、列表收录、搜索索引收录、slug 不含扩展名） |
+| 图片路径容错 | `resolveImageSrc` 19 项断言 × 有/无 basePath 两种模式 | 全过。顺带修掉一个**原本就有**的 bug：协议相对地址 `//example.com/a.png` 在有 basePath 时被拼成 `/base//example.com/a.png` |
+| `npm run new` | 交互 / 非交互 / 纯中文标题三种调用 | 全部正常；非 TTY 环境下不会卡在提问上 |
 
 ### 三个修掉的 bug
 

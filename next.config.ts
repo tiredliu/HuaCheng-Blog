@@ -44,6 +44,25 @@ const nextConfig: NextConfig = {
 
 const withMDX = createMDX({
   /**
+   * 同时把 `.md` 和 `.mdx` 当 MDX 处理。
+   *
+   * ⚠️ **这一行不能删。** `@next/mdx` 的默认值是 `/\.mdx$/` —— **只有 `.mdx`**。
+   * 少了它，`content/posts/` 里的 `.md` 文件不会被任何 loader 处理，
+   * Turbopack 会直接报：
+   *
+   *   ./content/posts/xxx.md
+   *   Unknown module type
+   *   This module doesn't have an associated type.
+   *
+   * 而「两种后缀都能用」是有意的：
+   * - Typora / Obsidian 这类写作工具**原生只认 `.md`**，不认 `.mdx`
+   * - Typora 在部分平台保存时还会把 `.mdx` 悄悄改名成 `.md`
+   *
+   * 两种后缀走的是**同一条管线**，所以 `.md` 里照样能写 `<Callout>`、
+   * Shiki 高亮和 KaTeX 公式 —— 区别只在文件名。
+   */
+  extension: /\.mdx?$/,
+  /**
    * Turbopack 下插件只能用「字符串名 + 可序列化的选项」传递，不能传函数。
    *
    * remark（Markdown → AST）
@@ -57,6 +76,19 @@ const withMDX = createMDX({
    *   rehype-katex        把数学节点渲染成 KaTeX HTML
    */
   options: {
+    /**
+     * ⚠️ **这一行也不能删，它比 `extension` 更容易被忽略。**
+     *
+     * MDX 的 `format` 默认是 `'detect'` —— 按**扩展名**猜：
+     * 扩展名在 `mdExtensions`（`.md` / `.markdown` / `.txt` …）里就按**纯 Markdown**
+     * 编译，其余才按 MDX 编译。于是 `.md` 文件里的 JSX 会被**静默丢掉**：
+     * 实测 `<Callout title="x">内容</Callout>` 只剩「内容」、
+     * 表达式 `{1 + 1}` 原样输出成字面量 —— 这是「不报错但改了内容」，最难查。
+     *
+     * 显式写 `format: 'mdx'` 之后，`.md` 和 `.mdx` 走**完全一样**的管线。
+     * 纯 Markdown 是 MDX 的子集，所以这么设不影响普通写作。
+     */
+    format: "mdx",
     remarkPlugins: ["remark-frontmatter", "remark-gfm", "remark-math"],
     rehypePlugins: [
       "rehype-slug",
