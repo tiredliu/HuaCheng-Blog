@@ -8,7 +8,6 @@
     "dev:next": "next dev",
     "new": "node scripts/new-post.mjs",
     "lyrics": "node scripts/import-lyrics.mjs",
-    "lyrics:init": "node scripts/import-lyrics.mjs --init",
     "build": "node scripts/tina.mjs build && next build",
     "build:cms": "node scripts/tina.mjs build",
     "build:app": "next build",

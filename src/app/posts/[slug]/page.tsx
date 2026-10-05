@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CalendarDays, FileText } from "lucide-react";
 import { MdxContent } from "@/components/MdxContent";
+import { PostBackLink } from "@/components/PostBackLink";
 import { PostInteractions } from "@/components/PostInteractions";
 import { PostStatsBar } from "@/components/PostStatsBar";
 import { ReadingProgress } from "@/components/ReadingProgress";
@@ -91,14 +92,8 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
       <ReadingProgress />
 
       <article className="animate-fade-up">
-        {/* 返回 */}
-        <Link
-          href="/posts"
-          className="mb-6 inline-flex items-center gap-1.5 text-xs font-medium text-stone-500 transition-colors hover:text-brand-600 dark:text-stone-400"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          返回文章列表
-        </Link>
+        {/* 返回：从标签页进来就回该标签的文章列表 */}
+        <PostBackLink />
 
         {/* 文章头部 */}
         <header className="mb-8 border-b border-stone-200 pb-6 dark:border-stone-800">
@@ -127,7 +122,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
             </span>
             <span>作者：{post.author}</span>
             {/* 浏览次数与点赞：数字只有浏览器知道，所以这里是客户端组件 */}
-            <PostStatsBar slug={slug} settings={siteSettings.interactions} />
+            <PostStatsBar
+              slug={slug}
+              settings={siteSettings.interactions}
+              likesFromGiscus={Boolean(siteSettings.giscus)}
+            />
           </div>
 
           {post.tags.length > 0 && (

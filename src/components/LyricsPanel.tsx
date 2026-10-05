@@ -457,9 +457,9 @@ export function LyricsPanel({
               这首歌还没有歌词
             </p>
             <p className="text-[10px] leading-relaxed text-stone-400">
-              跑 <code>npm run lyrics:init</code> 生成待填模板，
+              把 <code>&lt;id&gt;.lrc</code> 放进 <code>public/lyrics/</code>，
               <br />
-              把歌词粘进 <code>lyrics-src/</code> 后再跑 <code>npm run lyrics</code>
+              再跑 <code>npm run lyrics</code> 登记
             </p>
           </div>
         )}
