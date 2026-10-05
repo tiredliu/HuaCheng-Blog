@@ -14,7 +14,16 @@
     "strength": 100,
     "blur": 0
   },
-  "giscus": null,
+  "giscus": {
+    "repo": "tiredliu/HuaCheng-Blog",
+    "repoId": "R_kgDOSfdPJA",
+    "category": "Announcements",
+    "categoryId": "DIC_kwDOSfdPJM4DHEEh",
+    "mapping": "pathname",
+    "reactionsEnabled": true,
+    "inputPosition": "bottom",
+    "lang": "zh-CN"
+  },
   "interactions": {
     "provider": "local",
     "apiBase": ""

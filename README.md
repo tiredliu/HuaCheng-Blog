@@ -910,7 +910,7 @@ CSS 渐变是零请求、零解码成本的，用来做背景刚刚好；真需�
     "strength": 100,
     "blur": 0
   },
-  "giscus": null,
+  "giscus": null,           // null = 不启用；填入对象即启用（见「评论系统 → 推荐方案：Giscus」）
   "interactions": {
     "provider": "local",    // local = 只统计本机；remote = 调用下面的互动服务
     "apiBase": ""           // provider 为 remote 时填，例如 https://hc-blog-api.xxx.workers.dev
@@ -1045,13 +1045,15 @@ Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
 | 上传图片、保存站点默认值 | GitHub fine-grained token | **只有仓库主人** |
 | 发表留言 / 评论 | 什么都不用 | **任何访客**（默认只存在他自己浏览器里） |
 | **回复**留言 / 评论 | GitHub token 或部署互动服务 | **只有仓库主人** |
-| 用 GitHub 账号公开评论（Giscus） | GitHub 账号 | 任何有 GitHub 账号的人（**默认没启用**） |
+| 用 GitHub 账号公开评论（Giscus） | GitHub 账号 | 任何有 GitHub 账号的人（**本站已启用**） |
 
 所以：**文章确实只有仓库主人写得了。**
-仓库里已经内置了 Giscus 的接入代码，但
-[content/site-settings.json](content/site-settings.json) 里 `giscus` 是 `null`，
-**所以文章底部默认不会渲染任何 Giscus 评论区**；一旦按下面配置好，任何有
-GitHub 账号的人都能评论 —— 那时就**不是**只有主人能写了。
+仓库里已经内置了 Giscus 的接入代码，本站
+[content/site-settings.json](content/site-settings.json) 里的 `giscus` 已配置并启用，
+所以文章底部会渲染一条 GitHub 评论区：任何有 GitHub 账号的人都能在那里评论 ——
+此时就**不是**只有主人能写了。
+（代码里的默认值仍是 `null`：fork 这个项目后，需要按下面步骤自行配置，
+并把 Giscus App 装到自己的仓库上。）
 
 ### 二、访客的留言 / 评论，站长怎么回？
 
@@ -1173,10 +1175,11 @@ GitHub 账号的人都能评论 —— 那时就**不是**只有主人能写了�
 | --- | --- | --- | --- |
 | 文章底部（本机） | 访客自己浏览器里的评论 | 只有评论者自己 | —（站长看不到，所以回不了） |
 | 文章底部 / 留言板（互动服务） | 部署了 `workers/blog-api` 之后的全站评论 | 所有人 | **只有站长** |
-| 文章底部（Giscus） | GitHub Discussions，**默认没启用** | 所有访客，需要 GitHub 账号 | 站长在 Discussions 里回复 |
+| 文章底部（Giscus） | GitHub Discussions，**本站已启用** | 所有访客，需要 GitHub 账号 | 站长在 Discussions 里回复 |
 | 右侧留言板（仓库） | 站长发布的公开留言 | 所有人 | **只有站长** |
 
-几条通道互不干扰，可以同时存在。没配 Giscus 时，文章底部不会渲染 Giscus 区块。
+几条通道互不干扰，可以同时存在。没配 Giscus 时不会渲染该区块；本站已配好，
+所以文章底部多了一条 GitHub 账号评论区（代码里的默认值仍是 `null`）。
 
 ### 推荐方案：Giscus
 
@@ -1710,10 +1713,10 @@ node -e "console.log(require('os').tmpdir())"   # 看看系统临时目录在哪
 | 站点默认值 | ✅ | 存仓库的 `content/site-settings.json`，构建期注入，首屏即生效 |
 | 深浅色主题 | ✅ | 跟随系统 / 浅色 / 深色，无闪屏 |
 | **浏览量 / 点赞** | ✅ | 默认只统计本机（零配置）；部署 `workers/blog-api` 后变成全站真实数字 |
-| **评论区** | ✅ | 三通道：本机评论（零配置）/ 互动服务（全站可见）/ Giscus（默认未启用） |
+| **评论区** | ✅ | 三通道：本机评论（零配置）/ 互动服务（全站可见）/ Giscus（本站已启用） |
 | **留言与评论的回复** | ✅ | **只有仓库主人能做**，回复写进仓库或互动服务，所有访客可见 |
 | **列表页缩略框配图** | ✅ | `cover` 当卡片背景；没有封面时自动展示正文前 4 张图的缩略图带 |
-| Giscus 评论 | ✅ | 已接入，配置即启用；**默认不开**，所以现在文章底部没有 Giscus 区块 |
+| Giscus 评论 | ✅ | 已接入并在**本站启用**：文章底部有一条基于 GitHub Discussions 的评论区（代码默认值仍为 `null`） |
 | 后端 API | ⬜ | 纯静态方案；只有可选的互动服务（Workers + KV）算半个后端 |
 | 精确的阅读量 | ⬜ | KV 没有事务，并发写会覆盖；要精确得上 D1 + 事务 |
 | 浏览量的防刷 | ⬜ | `/hit` 谁都能调，可以被脚本刷；个人博客不做这个投入 |
