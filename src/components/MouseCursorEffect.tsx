@@ -415,7 +415,14 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       }
     };
 
-    const onPointerOver = () => {
+    /**
+     * ⚠️ 指针落到 iframe 上时，浏览器在 `pointerout` 之后**还会补一个 `pointerover`**
+     * （target 就是这个 iframe）。如果无脑复位，就会把刚设好的「已离开」立刻撤销 ——
+     * 表现就是「光标进了评论区却还冻在 iframe 外面」。所以这里要放过 iframe 目标。
+     */
+    const onPointerOver = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target instanceof HTMLElement && target.tagName === "IFRAME") return;
       pointerOutside = false;
     };
 
