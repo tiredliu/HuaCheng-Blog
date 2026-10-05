@@ -85,9 +85,30 @@
     outline-offset: 2px;
   }
 
-  /* 鼠标特效开启时隐藏原生光标（由 AI 图标替代，见 MouseCursorEffect） */
+  /*
+ * 鼠标特效开启时的两条全局约束（见 MouseCursorEffect）：
+ *
+ * 1. 隐藏原生光标，由 AI 六芒星替代。
+ * 2. **外壳禁止选中** —— 连点时鼠标难免有 1~2px 抖动，浏览器会把它当成「拖拽选词」
+ *    而产生选区，Edge 等随即弹出**原生的「选中迷你菜单」**；那是系统浮层，
+ *    弹出期间页面收不到 pointermove，自定义光标就会「停在原地、再瞬移」。
+ *    正文（.article）与表单仍然可选中：复制代码、选词编辑是刚需。
+ */
 html[data-cursor-fx="on"] * {
   cursor: none !important;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html[data-cursor-fx="on"] .article,
+html[data-cursor-fx="on"] .article *,
+html[data-cursor-fx="on"] input,
+html[data-cursor-fx="on"] textarea,
+html[data-cursor-fx="on"] select,
+html[data-cursor-fx="on"] [contenteditable],
+html[data-cursor-fx="on"] [contenteditable] * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* 自定义滚动条 */
