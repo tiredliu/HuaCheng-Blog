@@ -5,6 +5,7 @@ import { CloudUpload, LoaderCircle, Monitor, Moon, RotateCcw, Sun, SunMoon, Tria
 import { cn } from "@/lib/utils";
 import { SITE } from "@/lib/site";
 import { WallpaperSection } from "@/components/WallpaperSettings";
+import { COLOR_PRESETS } from "@/components/MouseCursorEffect";
 import { GithubTokenConfig, isGithubConfigured } from "@/components/GithubTokenConfig";
 import type { ThemePreference } from "@/components/BlogLayout";
 import type { WallpaperSettings } from "@/lib/wallpaper";
@@ -37,6 +38,15 @@ export interface SettingsPanelProps {
   onContentWidthChange: (width: ContentWidth) => void;
   sidebarWidth: number;
   onSidebarWidthChange: (width: number) => void;
+  /** 鼠标特效（AI 图标光标 + 拖尾 + 点击/按键音效）是否开启 */
+  cursorEffect: boolean;
+  onCursorEffectChange: (value: boolean) => void;
+  /** 六芒星光标 / 拖尾涟漪的颜色（#rrggbb） */
+  cursorColor: string;
+  onCursorColorChange: (value: string) => void;
+  /** 拖尾露出的代码颜色：空字符串表示跟随主题 */
+  codeColor: string;
+  onCodeColorChange: (value: string) => void;
   wallpaper: WallpaperSettings;
   onWallpaperChange: (update: React.SetStateAction<WallpaperSettings>) => void;
   /** 当前实际生效的是不是深色（用于壁纸预览配色） */
@@ -57,6 +67,37 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
       </div>
       {children}
     </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        checked ? "bg-brand-500" : "bg-stone-300 dark:bg-stone-600",
+      )}
+    >
+      <span
+        className={cn(
+          "h-5 w-5 rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-[22px]" : "translate-x-[2px]",
+        )}
+      />
+    </button>
   );
 }
 
@@ -111,6 +152,12 @@ export function SettingsPanel({
   onContentWidthChange,
   sidebarWidth,
   onSidebarWidthChange,
+  cursorEffect,
+  onCursorEffectChange,
+  cursorColor,
+  onCursorColorChange,
+  codeColor,
+  onCodeColorChange,
   wallpaper,
   onWallpaperChange,
   isDark,
@@ -205,6 +252,105 @@ export function SettingsPanel({
               className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-stone-200 accent-brand-500 dark:bg-stone-700"
             />
           </Row>
+
+          <Row
+            label="鼠标特效"
+            hint="AI 图标光标 + 拖尾拨开代码 + 点击/按键音效（默认开启，可关闭）"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs leading-relaxed text-stone-500 dark:text-stone-400">
+                {cursorEffect
+                  ? "已开启：移动鼠标即可看到六芒星与拨开代码"
+                  : "已关闭：使用系统默认光标"}
+              </span>
+              <Toggle
+                checked={cursorEffect}
+                onChange={onCursorEffectChange}
+                label="鼠标特效"
+              />
+            </div>
+          </Row>
+
+          {cursorEffect && (
+            <>
+              <Row label="光标颜色" hint="六芒星光标与拖尾涟漪的颜色">
+                <div className="flex flex-wrap items-center gap-2">
+                  {COLOR_PRESETS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => onCursorColorChange(option.value)}
+                      title={option.name}
+                      aria-label={option.name}
+                      aria-pressed={cursorColor.toLowerCase() === option.value.toLowerCase()}
+                      style={{ backgroundColor: option.value }}
+                      className={cn(
+                        "h-6 w-6 rounded-full border transition-transform hover:scale-110",
+                        cursorColor.toLowerCase() === option.value.toLowerCase()
+                          ? "border-stone-900 ring-2 ring-brand-300 dark:border-white"
+                          : "border-stone-200 dark:border-stone-700",
+                      )}
+                    />
+                  ))}
+                  <label className="ml-1 flex cursor-pointer items-center gap-1 text-[11px] text-stone-500 dark:text-stone-400">
+                    自定义
+                    <input
+                      type="color"
+                      value={cursorColor}
+                      onChange={(event) => onCursorColorChange(event.target.value)}
+                      aria-label="自定义光标颜色"
+                      className="h-6 w-8 cursor-pointer rounded border border-stone-200 bg-transparent p-0 dark:border-stone-700"
+                    />
+                  </label>
+                </div>
+              </Row>
+
+              <Row label="代码颜色" hint="拖尾露出的代码颜色，默认跟随深浅色主题">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onCodeColorChange("")}
+                    aria-pressed={codeColor === ""}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                      codeColor === ""
+                        ? "border-brand-300 bg-brand-50 text-brand-600 dark:border-brand-700 dark:bg-brand-950/40 dark:text-brand-300"
+                        : "border-stone-200 text-stone-500 hover:text-stone-800 dark:border-stone-700 dark:text-stone-400 dark:hover:text-stone-100",
+                    )}
+                  >
+                    跟随主题
+                  </button>
+                  {COLOR_PRESETS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => onCodeColorChange(option.value)}
+                      title={option.name}
+                      aria-label={option.name}
+                      aria-pressed={codeColor.toLowerCase() === option.value.toLowerCase()}
+                      style={{ backgroundColor: option.value }}
+                      className={cn(
+                        "h-6 w-6 rounded-full border transition-transform hover:scale-110",
+                        codeColor.toLowerCase() === option.value.toLowerCase()
+                          ? "border-stone-900 ring-2 ring-brand-300 dark:border-white"
+                          : "border-stone-200 dark:border-stone-700",
+                      )}
+                    />
+                  ))}
+                  <label className="ml-1 flex cursor-pointer items-center gap-1 text-[11px] text-stone-500 dark:text-stone-400">
+                    自定义
+                    <input
+                      type="color"
+                      value={codeColor || "#0d9488"}
+                      onChange={(event) => onCodeColorChange(event.target.value)}
+                      aria-label="自定义代码颜色"
+                      className="h-6 w-8 cursor-pointer rounded border border-stone-200 bg-transparent p-0 dark:border-stone-700"
+                    />
+                  </label>
+                </div>
+              </Row>
+            </>
+          )}
 
           <SiteDefaultsSection
             siteSettings={siteSettings}
