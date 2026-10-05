@@ -64,7 +64,7 @@ export default function AboutPage() {
           className="mb-0"
           eyebrow="About"
           title={`关于${SITE.author}`}
-          description={`${SITE.location}的前端工程师。喜欢把复杂的东西拆成可以讲清楚的零件，也喜欢把讲清楚的东西写成文章。`}
+          description={`${SITE.location}的开发者。喜欢把复杂的东西拆成可以讲清楚的零件，也喜欢把讲清楚的东西写成文章。`}
         />
       </div>
 

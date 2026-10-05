@@ -19,7 +19,7 @@ const CHANNELS = [
   {
     Icon: GitBranch,
     label: "GitHub",
-    value: "hua-cheng",
+    value: SITE.repository.replace("https://github.com/", ""),
     href: SITE.repository,
     note: "这个博客的源码就是公开的，欢迎提 Issue 或 PR",
   },
