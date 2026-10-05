@@ -76,6 +76,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN" suppressHydrationWarning data-scroll-behavior="smooth">
       <head>
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
+        {/* 配了 Giscus 才提前建连：评论区的脚本与 iframe 都在 giscus.app 上。
+            能省掉一次 DNS + TLS 握手，但真正快慢取决于到 giscus.app / GitHub 的网络。 */}
+        {siteSettings.giscus && (
+          <>
+            <link rel="preconnect" href="https://giscus.app" crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href="https://giscus.app" />
+          </>
+        )}
       </head>
       <body>
         <BlogLayout

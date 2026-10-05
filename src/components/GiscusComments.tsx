@@ -88,14 +88,40 @@ export function GiscusComments({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, effectiveMapping, term]);
 
-  // 主题切换时通过 postMessage 通知 iframe，避免整块重新加载
+  /**
+   * 主题同步：用 postMessage 通知 iframe，而不是重建（重建会闪一下、还会丢草稿）。
+   *
+   * ⚠️ 要处理两个时序问题，否则会出现「页面深色、评论框却是浅色」：
+   * 1. giscus 的 iframe 是**异步**插入的，同步那一刻 `querySelector` 往往还取不到；
+   * 2. 首屏 hydration 时「跟随系统」还没解析出真实值（`useMediaQuery` 的服务端快照是
+   *    `false`），脚本可能先以浅色创建。
+   * 所以除了「主题变化时发一次」，还要在 **iframe 插入 / 加载完成**后补发一次。
+   */
   useEffect(() => {
     if (!config) return;
-    const frame = containerRef.current?.querySelector("iframe");
-    frame?.contentWindow?.postMessage(
-      { giscus: { setConfig: { theme: isDark ? "dark_dimmed" : "light" } } },
-      ORIGIN,
-    );
+    const container = containerRef.current;
+    if (!container) return;
+
+    const theme = isDark ? "dark_dimmed" : "light";
+    const post = () => {
+      container
+        .querySelector("iframe")
+        ?.contentWindow?.postMessage({ giscus: { setConfig: { theme } } }, ORIGIN);
+    };
+
+    post(); // iframe 已经在了（主题切换的场景）就立即同步
+
+    const attach = () => container.querySelector("iframe")?.addEventListener("load", post);
+    attach(); // 可能已经插入
+
+    // iframe 是异步加进来的：一插入就挂上 load，加载完成后再补发一次主题
+    const observer = new MutationObserver(() => {
+      attach();
+      post();
+    });
+    observer.observe(container, { childList: true });
+
+    return () => observer.disconnect();
   }, [config, isDark]);
 
   if (!config) return null;

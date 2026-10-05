@@ -272,6 +272,14 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     let raf = 0;
     let lastKeyAt = 0;
     let lastBurstAt = 0;
+    /**
+     * 指针是否已经离开顶层文档（进入 iframe —— 例如 Giscus 评论框 —— 或移出窗口）。
+     *
+     * iframe 是**独立文档**：指针移进去后顶层窗口收不到 `pointermove`，
+     * 自定义光标就会「冻」在 iframe 边界外不动（而 iframe 内部显示的是原生光标）。
+     * 检测到离开就整帧清空、不画光标，避免留下卡住的残影。
+     */
+    let pointerOutside = false;
 
     /** 从锚点向目标点走，每隔 STAMP_SPACING 放一个印记，保证拖尾连续 */
     const addStamps = (toX: number, toY: number) => {
@@ -390,9 +398,25 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     /* ---------------- 事件 ---------------- */
     const onMove = (e: PointerEvent) => {
+      pointerOutside = false;
       pointer.x = e.clientX;
       pointer.y = e.clientY;
       addStamps(e.clientX, e.clientY);
+    };
+
+    /**
+     * 指针离开顶层文档：`relatedTarget` 为 null（进了 iframe，或移出了窗口），
+     * 或者直接落在 iframe 元素上（部分浏览器的行为）。
+     */
+    const onPointerOut = (e: PointerEvent) => {
+      const related = e.relatedTarget as Node | null;
+      if (related === null || (related instanceof HTMLElement && related.tagName === "IFRAME")) {
+        pointerOutside = true;
+      }
+    };
+
+    const onPointerOver = () => {
+      pointerOutside = false;
     };
 
     const onDown = (e: PointerEvent) => {
@@ -463,6 +487,8 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     window.addEventListener("pointerdown", onDown, { passive: true });
     window.addEventListener("keydown", onKey, { passive: true });
     window.addEventListener("mousedown", suppressMultiClickSelection, true);
+    document.addEventListener("pointerout", onPointerOut, { passive: true });
+    document.addEventListener("pointerover", onPointerOver, { passive: true });
 
     /* ---------------- 绘制 ---------------- */
     /** 画六芒星光标：持续旋转 + 每条边错相位地消失/重绘 */
@@ -603,6 +629,13 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       const now = performance.now();
       ctx.clearRect(0, 0, vw, vh);
 
+      // 指针进了 iframe / 出了窗口：拿不到 pointermove，直接不画，
+      // 免得没有跟随的光标「冻」在 iframe 边界外
+      if (pointerOutside) {
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+
       drawReveal(now);
 
       // 点击涟漪（与光标同色）
@@ -632,6 +665,8 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", suppressMultiClickSelection, true);
+      document.removeEventListener("pointerout", onPointerOut);
+      document.removeEventListener("pointerover", onPointerOver);
       observer.disconnect();
       root.removeAttribute("data-cursor-fx");
       if (audio) void audio.close().catch(() => {});
