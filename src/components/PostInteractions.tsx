@@ -47,7 +47,7 @@ export function PostInteractions({ slug, repoComments, settings, giscus }: PostI
           config={giscus}
           isDark={isDark}
           heading="评论"
-          hint="评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，站长会在那里回复，也可以随时导出。"
+          hint="评论由 GitHub Discussions 提供：登录一次 GitHub 账号即可在全站通用（各篇文章与留言板共用同一个登录），换账号可在评论区内点击退出登录；数据保存在仓库的 Discussions 里，可随时导出。"
         />
       </div>
     );

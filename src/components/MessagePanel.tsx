@@ -169,7 +169,7 @@ export function MessagePanel({
                     showHeading={false}
                     mapping="specific"
                     term={GUESTBOOK_DISCUSSION_TERM}
-                    hint="需要登录 GitHub 账号才能留言，内容对所有访客公开。"
+                    hint="登录一次 GitHub 账号即可留言，全站通用；换账号在评论区内点退出登录。内容对所有访客公开。"
                   />
                 </div>
               </div>
