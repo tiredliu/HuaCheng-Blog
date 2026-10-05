@@ -654,20 +654,23 @@ export const defaultPlaylist: Track[] = [
 
 ### 加歌词：`npm run lyrics`
 
+歌词**只放一个地方**：`public/lyrics/`（没有额外的暂存目录）。
+
 ```bash
-# 1. 按歌单生成一套待填模板（每个模板顶部写清了是哪首歌）
-npm run lyrics:init
+# 1. 把歌词文件直接丢进 public/lyrics/
+#    文件名用歌单里的 id 或标题都行，.lrc / .txt 都认：
+#      public/lyrics/ivory-tower.lrc     ← 按 id（推荐）
+#      public/lyrics/还是分开.lrc         ← 按标题
+#      public/lyrics/春娇与志明.txt       ← 纯文本（一行一句，会转成无时间轴歌词）
 
-# 2. 把歌词粘进 lyrics-src/*.txt（注释行下面直接贴，一行一句）
-#    带时间轴的 LRC 整段贴进去也认
-
-# 3. 导入
+# 2. 归一化 + 登记
 npm run lyrics
 ```
 
-脚本会自己把文件转成 `public/lyrics/<id>.lrc`（补好 `[ti:]` / `[ar:]`），
+脚本会补好 `[ti:]` / `[ar:]`、统一改名成 `public/lyrics/<id>.lrc`
+（按标题命名或 `.txt` 的会就地改名，不在目录里留两份），
 并在 `src/lib/music.ts` 对应条目里插好 `lyrics:` 那一行。
-**没填的模板会被跳过**，不会生成一堆空歌词文件，跑完会提示还剩几首待填。
+文件里没有正文的会被跳过，不会生成空歌词文件；跑完打印「歌词 ⇄ 歌曲」对照表。
 完整说明见 [public/lyrics/README.md](public/lyrics/README.md)。
 
 > ⚠️ **版权**：音乐和歌词都是受版权保护的作品，而这个博客是**公开仓库** ——

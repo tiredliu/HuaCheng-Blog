@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 /**
- * 歌词一键导入。
+ * 歌词登记 / 归一化。
  *
  *   npm run lyrics
  *
+ * 歌词**只放一个地方**：`public/lyrics/`。
+ *
  * 用法
  * ----
- * 1. 把歌词文件放进项目根的 `lyrics-src/`（目录不存在时会先提示你创建）
- * 2. 文件名用**歌单里的标题或 id** 都行，扩展名 `.lrc` 或 `.txt` 都认：
+ * 1. 把歌词文件直接丢进 `public/lyrics/`，文件名用**歌单里的 id 或标题**都行：
  *
- *      lyrics-src/还是分开.lrc          ← 按标题匹配
- *      lyrics-src/ivory-tower.lrc       ← 按 id 匹配
- *      lyrics-src/春娇与志明.txt         ← 纯文本也行（会生成无时间轴歌词）
+ *      public/lyrics/ivory-tower.lrc    ← 按 id（推荐，也是最终形态）
+ *      public/lyrics/还是分开.lrc        ← 按标题
+ *      public/lyrics/春娇与志明.txt      ← 纯文本也行（会转成无时间轴歌词）
  *
- * 3. 跑一次 `npm run lyrics`，脚本会：
- *    - 把文件复制成 `public/lyrics/<id>.lrc`（顺便补上 [ti:] / [ar:] 元信息）
+ * 2. 跑一次 `npm run lyrics`，脚本会：
+ *    - 补上缺失的 [ti:] / [ar:] 元信息
+ *    - 统一成 `public/lyrics/<id>.lrc`；标题命名或 `.txt` 的会**就地改名**并删掉原文件
+ *      （避免同一首歌在目录里留下两份）
  *    - 在 `src/lib/music.ts` 对应条目里插一行 `lyrics: lyricSrc("<id>.lrc"),`
- *    - 已经登记过的会跳过，不会重复写
+ *    - 已经登记过的只更新文件内容，不重复写
  *
  * 文件格式
  * --------
@@ -34,13 +37,12 @@
  * 只放你有权利放的内容。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, parse as parsePath, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC_DIR = join(ROOT, "lyrics-src");
-const OUT_DIR = join(ROOT, "public", "lyrics");
+const LYRICS_DIR = join(ROOT, "public", "lyrics");
 const MUSIC_FILE = join(ROOT, "src", "lib", "music.ts");
 
 /* ---------------- 读歌单 ---------------- */
@@ -85,8 +87,8 @@ function readPlaylist() {
 /**
  * 去掉注释行（`#` 开头）与空行，剩下的就是真正的歌词。
  *
- * `npm run lyrics:init` 生成的待填模板整篇都是注释 ——
- * 靠这个判断就能把「还没填」和「填了」区分开，不会生成一堆空歌词文件。
+ * 用来判断一个文件「到底有没有正文」，避免生成空歌词文件
+ * （歌词窗显示「这个歌词文件是空的」比不显示更糟）。
  */
 function stripComments(text) {
   return text
@@ -100,8 +102,7 @@ function stripComments(text) {
 
 /** 把纯文本歌词转成没有时间轴的 LRC（保留元信息，正文原样） */
 function textToLrc(text, title, artist) {
-  const body = stripComments(text);
-  return `[ti:${title}]\n[ar:${artist}]\n\n${body}\n`;
+  return `[ti:${title}]\n[ar:${artist}]\n\n${stripComments(text)}\n`;
 }
 
 /** 给已有的 LRC 补上缺失的元信息 */
@@ -130,56 +131,28 @@ function registerLyrics(source, id, fileName) {
   return source.slice(0, at) + insertion + source.slice(at);
 }
 
-/* ---------------- 生成待填模板 ---------------- */
-
-/** `npm run lyrics:init`：给歌单里每首歌生成一个待填的歌词模板 */
-function initTemplates(tracks) {
-  mkdirSync(SRC_DIR, { recursive: true });
-  let created = 0;
-
-  for (const track of tracks) {
-    const path = join(SRC_DIR, `${track.id}.txt`);
-    if (existsSync(path)) continue;
-
-    writeFileSync(
-      path,
-      [
-        `# 《${track.title}》— ${track.artist}`,
-        `#`,
-        `# 把歌词粘贴到下面，一行一句（开头的 # 是注释，导入时会被丢掉）`,
-        `# 如果手上有带时间轴的 LRC，直接整段粘进来也认：`,
-        `#   [00:12.34]这是一句歌词`,
-        `#`,
-        `# 歌词从哪来：网易云音乐 / QQ音乐 / Apple Music 的歌词面板都能复制。`,
-        `# 填好之后跑：npm run lyrics`,
-        ``,
-      ].join("\n"),
-      "utf8",
-    );
-    created += 1;
-  }
-
-  console.log(`已在 lyrics-src/ 生成 ${created} 个模板（已存在的不动）。\n`);
-  return created;
-}
-
 /* ---------------- 状态对照表 ---------------- */
 
-/** 判断一首歌目前处于哪种状态：已导入 / 待导入 / 模板待填 / 还没建模板 */
+/** 判断一首歌目前处于哪种状态：已登记 / 待登记 / 文件是空的 / 还没有歌词 */
 function statusOf(track) {
-  const lrcPath = join(OUT_DIR, `${track.id}.lrc`);
-  if (track.hasLyrics && existsSync(lrcPath)) return "done";
+  const canonical = join(LYRICS_DIR, `${track.id}.lrc`);
+  if (track.hasLyrics && existsSync(canonical)) return "done";
 
-  // lyrics-src/ 里的模板填了没有（标题命名也算）
-  for (const name of [`${track.id}.txt`, `${track.id}.lrc`, `${track.title}.txt`, `${track.title}.lrc`]) {
-    const path = join(SRC_DIR, name);
+  // 文件名对得上、但还没登记进 music.ts 的歌词
+  for (const name of [`${track.id}.lrc`, `${track.id}.txt`, `${track.title}.lrc`, `${track.title}.txt`]) {
+    const path = join(LYRICS_DIR, name);
     if (!existsSync(path)) continue;
     return stripComments(readFileSync(path, "utf8")) ? "ready" : "empty";
   }
   return track.hasLyrics ? "done" : "missing";
 }
 
-const STATUS_MARK = { done: "✓ 已导入", ready: "● 待导入", empty: "○ 待填写", missing: "— 无模板" };
+const STATUS_MARK = {
+  done: "✓ 已登记",
+  ready: "● 待登记",
+  empty: "○ 空文件",
+  missing: "— 无歌词",
+};
 
 /**
  * 终端里的显示宽度：中日韩字符占 **两格**，`"abc".padEnd()` 只按字符数算，
@@ -188,9 +161,7 @@ const STATUS_MARK = { done: "✓ 已导入", ready: "● 待导入", empty: "○
 function displayWidth(text) {
   let width = 0;
   for (const char of text) {
-    width += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/.test(char)
-      ? 2
-      : 1;
+    width += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/.test(char) ? 2 : 1;
   }
   return width;
 }
@@ -205,10 +176,7 @@ function printStatus(tracks) {
 
   const titleWidth = Math.max(...rows.map((r) => displayWidth(r.title)), 6);
   // 歌手名可能很长（多人合唱），截断到 18 格，免得表格被撑爆
-  const artistWidth = Math.min(
-    Math.max(...rows.map((r) => displayWidth(r.artist)), 6),
-    18,
-  );
+  const artistWidth = Math.min(Math.max(...rows.map((r) => displayWidth(r.artist)), 6), 18);
   const cut = (text, width) => {
     let out = "";
     for (const char of text) {
@@ -227,10 +195,10 @@ function printStatus(tracks) {
       row.state === "done"
         ? `public/lyrics/${row.id}.lrc`
         : row.state === "ready"
-          ? `lyrics-src/${row.id}.txt  ← 跑 npm run lyrics 导入`
+          ? `public/lyrics/ ← 跑 npm run lyrics 归一化并登记`
           : row.state === "empty"
-            ? `lyrics-src/${row.id}.txt  ← 还没粘歌词`
-            : `跑 npm run lyrics:init 建模板`;
+            ? `public/lyrics/ 里的文件没有歌词正文`
+            : `把 ${row.id}.lrc 放进 public/lyrics/`;
 
     console.log(
       `${padTo(STATUS_MARK[row.state], 11)} ${padTo(row.title, titleWidth)}  ${padTo(cut(row.artist, artistWidth), artistWidth)}  ${detail}`,
@@ -239,18 +207,15 @@ function printStatus(tracks) {
 
   const done = rows.filter((r) => r.state === "done").length;
   console.log(line);
-  console.log(`已导入 ${done} / ${rows.length} 首歌词。\n`);
+  console.log(`已登记 ${done} / ${rows.length} 首歌词。\n`);
 }
 
 /* ---------------- 主流程 ---------------- */
 
 function main() {
-  const isInit = process.argv.includes("--init");
-
-  if (!existsSync(SRC_DIR)) {
-    mkdirSync(SRC_DIR, { recursive: true });
-    console.log(`已创建 ${SRC_DIR}`);
-    console.log("把歌词文件放进去（文件名用歌单里的标题或 id），再跑一次 npm run lyrics。\n");
+  if (!existsSync(LYRICS_DIR)) {
+    mkdirSync(LYRICS_DIR, { recursive: true });
+    console.log(`已创建 ${LYRICS_DIR}`);
   }
 
   const tracks = readPlaylist();
@@ -259,27 +224,13 @@ function main() {
     return 1;
   }
 
-  if (isInit) {
-    initTemplates(tracks);
-    printStatus(tracks);
-    console.log("把歌词粘进 lyrics-src/ 之后跑：npm run lyrics\n");
-    return 0;
-  }
-
-  const files = existsSync(SRC_DIR)
-    ? readdirSync(SRC_DIR).filter((name) => /\.(lrc|txt)$/i.test(name))
-    : [];
-
-  if (files.length === 0) {
-    console.log(`lyrics-src/ 里还没有歌词文件。跑 npm run lyrics:init 可以按歌单生成一套待填模板。\n`);
-    printStatus(tracks);
-    return 0;
-  }
+  // README.md 也是 .md，不会被这个正则匹配到；只认 .lrc / .txt
+  const files = readdirSync(LYRICS_DIR).filter((name) => /\.(lrc|txt)$/i.test(name));
 
   let musicSource = readFileSync(MUSIC_FILE, "utf8");
   let imported = 0;
-  let skipped = 0;
-  let pending = 0;
+  let updated = 0;
+  let emptyCount = 0;
   const unmatched = [];
 
   for (const name of files) {
@@ -291,11 +242,12 @@ function main() {
       continue;
     }
 
-    const raw = readFileSync(join(SRC_DIR, name), "utf8");
+    const path = join(LYRICS_DIR, name);
+    const raw = readFileSync(path, "utf8");
 
-    // 模板还没填（去掉注释后没有正文）→ 跳过，别生成空歌词文件
+    // 文件里没有正文（只剩注释 / 空）→ 跳过，别生成空歌词文件
     if (!stripComments(raw)) {
-      pending += 1;
+      emptyCount += 1;
       continue;
     }
 
@@ -305,11 +257,16 @@ function main() {
         : ensureMeta(raw, track.title, track.artist);
 
     const outName = `${track.id}.lrc`;
-    writeFileSync(join(OUT_DIR, outName), content, "utf8");
+    writeFileSync(join(LYRICS_DIR, outName), content, "utf8");
+
+    // 文件名不是规范名（按标题命名 / .txt）→ 归一化后删掉原文件，避免同一首留两份
+    if (name !== outName) {
+      unlinkSync(path);
+      console.log(`  ↻ ${track.title}  ${name} → ${outName}`);
+    }
 
     if (track.hasLyrics) {
-      skipped += 1;
-      console.log(`  ↷ ${track.title}  歌词文件已更新（music.ts 里已经登记过）`);
+      updated += 1;
       continue;
     }
 
@@ -325,10 +282,12 @@ function main() {
 
   if (imported > 0) writeFileSync(MUSIC_FILE, musicSource, "utf8");
 
-  console.log(`\n导入 ${imported} 首，更新 ${skipped} 首${pending > 0 ? `，待填 ${pending} 首` : ""}。`);
+  console.log(
+    `\n登记 ${imported} 首，更新 ${updated} 首${emptyCount > 0 ? `，空文件跳过 ${emptyCount} 个` : ""}。`,
+  );
 
   if (unmatched.length > 0) {
-    console.log(`\n没匹配上的文件（文件名要用歌单里的标题或 id）：`);
+    console.log(`\n没匹配上的文件（文件名要用歌单里的 id 或标题）：`);
     for (const name of unmatched) console.log(`  ${name}`);
   }
 
@@ -337,7 +296,7 @@ function main() {
   printStatus(readPlaylist());
 
   if (imported > 0) {
-    console.log(`记得跑一遍验证：npx tsc --noEmit && npx eslint .\n`);
+    console.log(`记得跑一遍验证：npm run typecheck && npm run lint\n`);
   }
 
   return 0;
