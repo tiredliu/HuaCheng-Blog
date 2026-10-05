@@ -18,7 +18,8 @@
 | 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
 | 公开留言/评论 | 走 **Giscus**（GitHub Discussions，配置在 `site-settings.json` 的 `giscus`）；`content/guestbook.json` + `comments.json` 只在**没配 Giscus** 时作为本机兜底 |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
-| 可选后端 | `workers/blog-api/`（Cloudflare Worker + KV：浏览量/点赞/评论；**独立部署，不参与 next build**） |
+| 浏览量后端 | `functions/api/[[route]].js`（Pages Function + D1，同源 `/api`，**跟站点一起部署**；见 `functions/README.md`） |
+| 点赞 / 评论 | 都不需要自建后端：点赞 = 评论区讨论上的 GitHub 反应数；评论 = Giscus（Discussions） |
 | 产物 | `out/`，部署到 Cloudflare Pages |
 | 包管理 | npm（Node 22） |
 | 语言 | 注释、文档、UI 文案、commit message **全部用中文** |
@@ -271,26 +272,31 @@ Turbopack 为每个模板字面量生成一个「上下文」，而**上下文�
 **默认没有后端。** 所有「写操作」都是浏览器直连 GitHub Contents API
 （需要站长自己的 fine-grained token，存在访客本地）。
 
-唯一的例外是**可选的互动服务**（`workers/blog-api/`，Cloudflare Worker + KV）：
-部署它之后，浏览量、点赞、评论才会变成全站真实数据。
-不部署也完全能跑 —— 会退化成「只统计本机浏览器」，界面上如实标注。
-两条路的关系是：
+**唯一还需要后端的只剩浏览数** —— `functions/api/[[route]].js`（Pages Function + D1），
+挂在站点同源的 `/api` 上，跟着 Pages 一起构建部署。
+点赞读的是评论区那条 Discussion 的 GitHub 反应数，评论与留言本身就是 GitHub Discussions ——
+这两件都不用你自己跑后端，也不受本站流量影响。关系是这样：
 
 ```text
-访客读页面 ──┬─ interactions.provider = "local"（默认）→ localStorage，零请求
-             └─ interactions.provider = "remote"       → fetch 到 Worker → KV
-                                                          （失败自动退回上面那条）
+浏览数 ──┬─ `provider = "local"`            → localStorage，零请求（界面标「（本机）」）
+        └─ `provider = "remote"` + `apiBase = "/api"` → Pages Function → D1
+                                            （D1 未绑 / 断网自动退回上面那条）
 
-站长的写操作 ─┬─ 文章 / 图片 / 站点设置        → GitHub Contents API
-              ├─ provider = "local" 时的留言回复 → 提交 content/*.json，构建后生效
-              └─ provider = "remote" 时的留言回复 → Worker 拿 token 向 GitHub 校验
-                                                    permissions.push 后才写入 KV
+点赞数 ─── 评论区那条 Discussion 的 GitHub 反应数（`data-emit-metadata` 广播出来）
+评论   ─── Giscus → 仓库的 Discussions（登录一次，全站通用）
+
+站长的写操作 ─┬─ 文章 / 图片 / 站点设置 → GitHub Contents API
+              ├─ 回复评论 / 留言       → 直接在 GitHub Discussions 里回（有通知，即时生效）
+              └─ 没配 Giscus 时的回复   → 提交 `content/*.json`，构建后生效
 ```
 
-⚠️ 互动层的**权限是服务端强制的**，不是「把按钮藏起来」：
-访客可以发表评论，但 `reply` / `owner` / 删除必须带站长凭据，
-Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
-改这块代码时不要在前端「顺手放宽」，那等于把仓库写权限发给所有人。
+⚠️ 走 Giscus 之后，评论的**权限由 GitHub 把着**：身份是 OAuth 授权的 GitHub 账号，
+没人能冒充站长，也不需要你交出任何凭据。
+只有在「没配 Giscus + 用了旧互动服务 `workers/blog-api`」那条老路上，
+`reply` / `owner` / 删除才需要站长凭据，而且是**服务端强制**的 ——
+Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`，
+不是站长就 403，且一个字节都不写。改这块代码时不要在前端「顺手放宽」，
+那等于把仓库写权限发给所有人。
 
 ---
 
@@ -335,7 +341,8 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | 互动数据存哪（本机 / 远程） | `content/site-settings.json` 的 `interactions` |
 | 站长回复写进仓库的格式 | `src/lib/repo-comments.ts` |
 | 列表页卡片的封面与缩略图 | `src/components/PostCard.tsx` + `src/lib/posts.ts` 的 `extractImages()` |
-| 浏览量/点赞/评论的后端 | `workers/blog-api/`（独立部署，改完要单独 `wrangler deploy`） |
+| 浏览量后端 | `functions/api/[[route]].js`（Pages Function + D1，跟站点一起部署） |
+| 旧互动服务（评论/点赞/回复，本站已不用） | `workers/blog-api/` |
 | 设置抽屉 | `src/components/SettingsPanel.tsx` |
 | 壁纸逻辑 | `src/lib/wallpaper.ts` + `WallpaperLayer/Settings.tsx` |
 | **资源目录约定**（图片/壁纸/音乐/歌词） | `src/lib/assets.ts` 的 `ASSET_DIRS` |
@@ -619,7 +626,8 @@ draft: false
 | 本机评论/留言的排版（兜底时） | `src/components/CommentThreadView.tsx`（评论区与留言板共用） |
 | Giscus 评论区的接入 | `src/components/GiscusComments.tsx`（文章用 `pathname` 映射；留言板传 `mapping="specific"` + `term="留言板"`） |
 | 站长写进仓库的文件格式 | `src/lib/repo-comments.ts` + `src/lib/interactions-file.ts`（**读写两侧要同时改**） |
-| 服务端的权限校验、限流、上限 | `workers/blog-api/src/index.js`，改完要单独 `wrangler deploy` |
+| 浏览数的服务端逻辑（计数 / 校验 / 额度） | `functions/api/[[route]].js`（跟站点一起部署） |
+| 旧互动服务的权限校验 / 限流 / 上限 | `workers/blog-api/src/index.js`（本站已不用；改完要单独 `wrangler deploy`） |
 
 ⚠️ 动第 5 行之前先想清楚：`interactions-file.ts` 读的字段和
 `repo-comments.ts` 写的字段必须一一对应，而且都要能在
@@ -711,7 +719,8 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 **代码高亮（Shiki 双主题）** · **数学公式（KaTeX）** · 标签 / 归档 ·
 视频 / 音乐 · **自定义壁纸（含直传仓库）** · **站点默认值存仓库** ·
 深浅色主题 · **头像** · **列表页封面图与正文缩略图** ·
-**浏览量 / 点赞**（本机 / 全站两档） · **评论区（Giscus：文章底部 + 留言板）** ·
+**浏览数（D1 全站 / 本机两档）** · **点赞（评论区讨论上的 GitHub 反应数）** ·
+**评论区（Giscus：文章底部 + 非文章页的留言板）** ·
 **Giscus 接入（本站已启用；代码默认未启用，未配时退回本机评论）** ·
 **资源按类型分目录**（图片 / 壁纸 / 音乐 / 歌词） · **悬浮歌词窗（可拖动缩放）** ·
 **Web Audio 音效（免费，默认关闭）**
@@ -721,8 +730,9 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 | 没做 | 原因 |
 | --- | --- |
 | 图片自动优化 | 静态导出下 `next/image` 优化器不可用；列表页缩略图也是原图缩放，图多了这里最该先优化 |
-| 精确的阅读量 | 互动服务用的 KV 没有事务，并发写会互相覆盖；要精确得上 D1 |
-| 浏览量的防刷 | `/hit` 谁都能调，可以被脚本刷；个人博客不做这个投入 |
+| 非 Cloudflare 托管时的全站浏览数 | Pages Function 只在 Cloudflare Pages 上跑得起来；换成 GitHub Pages / Nginx / Docker 会自动退回本机计数 |
+| 浏览量的防刷 | `/api/hit` 没有鉴权，可以被脚本刷；浏览量本就是模糊指标，个人博客不做这个投入 |
+| 并发下的精确计数 | ✅ **已解决**：D1 用 `count = count + 1` 原子自增；旧的 Worker + KV 没有事务、每天只有 1000 次写，那才是「访问一上来就崩」的原因 |
 | 代码块行号 / 行高亮 | Shiki 的 transformers 需要传函数，Turbopack 下不可用 |
 | 匿名的全站评论 | 本站统一走 Giscus，需要 GitHub 账号；想要匿名评论得换 Waline 一类（那要部署服务） |
 

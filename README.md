@@ -23,7 +23,8 @@
 - [静态资源放在哪](#静态资源放在哪) ← 图片 / 壁纸 / 音频 / 歌词各放哪个目录
 - [界面说明](#界面说明) · [音乐播放器](#音乐播放器) · [站内搜索](#站内搜索)
 - [壁纸](#壁纸) · [**设置存在哪**](#设置存在哪)
-- [**互动：浏览量 · 点赞 · 评论区**](#互动浏览量--点赞--评论区) ← 含**统计后端怎么部署**
+- [**互动：浏览量 · 点赞 · 评论区**](#互动浏览量--点赞--评论区) ← 三个数字各自的来源
+- [浏览量的后端：Pages Function + D1](#浏览量的后端pages-function--d1) ← **全站浏览数怎么部署**
 - [**留言与评论怎么回复**](#留言与评论怎么回复) ← 谁的评论谁看得见、谁能回复
 - [评论系统](#评论系统) · [头像与站点信息](#头像与站点信息)
 - [部署](#部署) ← Cloudflare Pages / GitHub Pages / Vercel / Nginx / Docker
@@ -51,7 +52,9 @@
 | 代码高亮 | Shiki 4 | 构建期着色，双主题、运行期零成本 |
 | 数学公式 | KaTeX 0.19 | 构建期渲染，字体按需下载 |
 | 后台 | TinaCMS 3 | 网页编辑器，保存即提交 GitHub |
-| 评论 | 本机评论 / 互动服务 / Giscus | 默认零配置；想要全站可见的评论就部署一个可选的 Cloudflare Worker |
+| 评论 | Giscus（GitHub Discussions） | 零后端；fork 后可换成自带的本机评论或互动服务 |
+| 浏览数 | Cloudflare Pages Function + D1 | 与站点同源的 `/api`，建一个 D1 库即可，**约 3 分钟** |
+| 点赞 | 评论区的 GitHub 反应数 | 计数存在 GitHub 侧，本站流量再大也不会把它压垮 |
 | 托管 | Cloudflare Pages | 全球 CDN，免费额度足够 |
 
 ---
@@ -108,10 +111,11 @@ hua-cheng-blog/
 │   │   ├── SearchDialog.tsx        ⌘K 搜索弹窗（高亮、键盘导航）
 │   │   ├── Sidebar.tsx             可隐藏、可拖拽宽度的导航
 │   │   ├── ContentArea.tsx         内容区
-│   │   ├── MessagePanel.tsx        可隐藏留言板（仓库留言 + 本机留言 + 站长回复）
-│   │   ├── CommentThreadView.tsx   评论 / 留言的展示与输入（评论区与留言板共用）
-│   │   ├── PostInteractions.tsx     文章底部评论区（本机 / 互动服务 / Giscus）
-│   │   ├── PostStatsBar.tsx        文章头部的浏览次数与点赞
+│   │   ├── MessagePanel.tsx        可隐藏留言板（非文章页 = 全站留言；文章页改提示跳到正文评论）
+│   │   ├── CommentThreadView.tsx   本机评论 / 留言的展示与输入（没配 Giscus 时的兜底）
+│   │   ├── PostInteractions.tsx     文章底部评论区（Giscus；未配置时退回本机评论）
+│   │   ├── PostStatsBar.tsx        文章头部的浏览次数（D1）与点赞（GitHub 反应数）
+│   │   ├── PostBackLink.tsx        文章顶部的「返回」：从标签页进来会回到那个标签
 │   │   ├── WallpaperLayer.tsx      全屏壁纸层（fixed + -z-10）
 │   │   ├── SettingsPanel.tsx       设置抽屉 + 站点默认值保存
 │   │   ├── WallpaperSettings.tsx   壁纸设置（预设 / 直传仓库 / 本机）
@@ -152,7 +156,11 @@ hua-cheng-blog/
 │   ├── guestbook.json              ★ 站长发布的公开留言（所有人可见）
 │   ├── comments.json               ★ 站长发布的公开评论与回复（所有人可见）
 │   └── site-settings.json          ★ 站点默认设置（可提交到仓库）
-├── workers/blog-api/               ★ 可选的 Cloudflare Worker：浏览量/点赞/评论后端
+├── functions/
+│   ├── api/[[route]].js            ★ 浏览量后端：Pages Function + D1（GET /api/stats、POST /api/hit）
+│   └── README.md                   ★ D1 的创建、绑定与验证步骤
+├── workers/blog-api/               ☆ 旧方案：Worker + KV 的互动服务（评论/点赞/站长回复）
+│                                      本站已不用；保留给想要「页面内直接回复」的人，见对应 README
 ├── public/
 │   ├── images/                     文章配图与封面
 │   ├── wallpapers/                 站点壁纸
@@ -524,10 +532,12 @@ git push
 ```
 
 - **左侧导航**：桌面端可整体隐藏，右边缘拖拽可调宽度（220–400px），头像来自 `public/avatar.png`
-- **右侧留言板**：可隐藏；留言走 Giscus（GitHub Discussions），登录 GitHub 后即可公开留言，
-  站长在 Discussions 里回复（见[留言与评论怎么回复](#留言与评论怎么回复)）
-- **文章头部的浏览量与点赞**：默认只统计本机，部署互动服务后是全站数字
+- **右侧留言板**：可隐藏；在首页 / 列表 / 关于等页面就是**全站留言板**（一条名为「留言板」的 Discussion）；
+  在文章页会提示「本页评论在正文底部」并给你一个跳转（原因见[评论区](#评论区giscus一页只留一个实例)）
+- **文章头部的浏览数与点赞**：浏览数来自 D1（全站真实数字，没配后端时显示「（本机）」）；
+  点赞数是评论区那条 Discussion 上的 GitHub 反应数，**点赞动作在评论区里点 👍**
 - **文章底部评论区**：Giscus（GitHub Discussions）一条通道；没配 Giscus 时退回本机评论
+- **从标签页打开的文章**：顶部「返回」回到那个标签的文章列表，而不是全部文章
 - **顶栏搜索**：桌面端显示成输入框，按 `⌘K` / `Ctrl+K` 随时唤起
 - **主题**：浅色 / 深色，首次访问跟随系统；`<head>` 里有内联脚本防闪屏
 - **壁纸**：内置预设 / 直传仓库 / 只存本机，可调强度与模糊（见下文「壁纸」一节）
@@ -912,8 +922,8 @@ CSS 渐变是零请求、零解码成本的，用来做背景刚刚好；真需�
   },
   "giscus": null,           // null = 不启用；填入对象即启用（见「评论系统 → 推荐方案：Giscus」）
   "interactions": {
-    "provider": "local",    // local = 只统计本机；remote = 调用下面的互动服务
-    "apiBase": ""           // provider 为 remote 时填，例如 https://hc-blog-api.xxx.workers.dev
+    "provider": "remote",   // local = 只统计本机；remote = 读下面的 apiBase
+    "apiBase": "/api"       // 浏览量后端；Pages Function + D1 用同源的 "/api"（见「浏览量的后端」）
   }
 }
 ```
@@ -954,25 +964,61 @@ push 之后 Cloudflare 重新构建，对所有访客生效。
 
 | 位置 | 内容 |
 | --- | --- |
-| 文章头部 | `123 次浏览` + 一个心形点赞按钮（点一下变红，再点取消） |
-| 文章底部 | 评论区：条数、输入框、评论列表、站长回复 |
+| 文章头部 | `123 次浏览` + `N 个赞` —— 前者是 D1 里的全站数字，后者是评论区那条 Discussion 上的 GitHub 反应数 |
+| 文章底部 | Giscus 评论区（GitHub Discussions），`#comments` 是它的锚点 |
 | 文章列表卡片 | 与统计无关，只显示封面图 / 正文缩略图（见[缩略框配图](#列表页那张卡片缩略框上会显示什么图)） |
 
-### 两种数字来源
+### 三个数字，三个来源
 
-浏览量、点赞、评论都属于「需要有人记住」的数据，而静态站点没有服务端。
-所以这里有两档，由 `content/site-settings.json` 的 `interactions` 决定：
+浏览数、点赞数、评论都属于「需要有人记住」的数据，而纯静态站点没有服务端。
+本站把它们分给了三个不同的地方 —— **哪个最不容易崩，就由谁来记**：
 
-| | `provider: "local"`（默认） | `provider: "remote"` |
+| 东西 | 记在哪 | 全站共享 | 需要部署吗 | 拿不到会怎样 |
+| --- | --- | :---: | --- | --- |
+| **浏览数** | Cloudflare **D1**（`functions/api`，与页面同源的 `/api`） | ✅ | 建一次 D1 库（约 3 分钟） | 退回「本机计数」，标注「（本机）」 |
+| **点赞数** | 评论区那条 Discussion 上的 **GitHub 反应数** | ✅ | ❌ | 显示占位「—」，不会假装是 0 |
+| **评论 / 留言** | 仓库的 **GitHub Discussions**（Giscus） | ✅ | ❌（但要装 Giscus App） | 未配置时退回本机评论 |
+
+**为什么不用一套后端把它们全包了**：因为代价最小的那条路刚好各不相同。
+
+- **点赞**要的只是一个计数，而 GitHub 讨论上的反应天生就是计数 ——
+  数据在 GitHub 侧，**本站访问量再大也不会把它压垮**，连额外请求都不必发。
+- **评论**要的是「互相看得见、能回复」，而 Discussions 本来就是 GitHub 原生的评论区。
+- 只剩下**浏览数**没有现成归属，才给它挂一个几十行的 Function + D1。
+
+浏览数走哪条路，由 `content/site-settings.json` 的 `interactions` 决定：
+
+| | `provider: "local"` | `provider: "remote"` + `apiBase: "/api"` |
 | --- | --- | --- |
-| 数据存在哪 | 访客自己的浏览器 `localStorage` | Cloudflare Worker 的 KV（**所有人的数据在一起**） |
-| 浏览 / 点赞数字 | 只是这台电脑的记录 | **全站真实数字** |
-| 访客的评论 | 只有自己看得见 | 所有访客都看得见 |
-| 需要部署什么 | 什么都不用 | 部署一次 `workers/blog-api`（见下） |
+| 浏览数存在哪 | 访客自己的浏览器 `localStorage` | Cloudflare D1（**所有人的数据在一起**） |
+| 需要部署什么 | 什么都不用 | 建一个 D1 库并绑定（见下） |
 | 界面上怎么标注 | 数字后面写「（本机）」 | 不标注，鼠标悬停显示「全站计数」 |
 
-**默认是 `local`**：不部署任何东西也能用，并且站点一个第三方请求都不发。
-远程服务连不上时（没部署、断网、被拦截）会自动退化成本机模式，不会白屏。
+远程连不上时（没部署、断网、被拦截）**自动退化成本机**，不打扰访客，也不显示 `0` 这种假数字。
+
+### 评论区：Giscus（一页只留一个实例）
+
+这是本站唯一一个「和直觉不一样」的限制，值得单独记一笔：
+
+**giscus 的 `client.js` 会复用页面上第一个 `.giscus` 容器，且 iframe 的高度消息不带发送方标识 ——
+所以它天然只支持「一个页面一个实例」。**
+
+后果与本站的做法：
+
+| 页面 | 显示什么 |
+| --- | --- |
+| 文章页 | 正文底部是这篇文章的讨论（按 `pathname` 映射）；此时右侧留言板**不再内嵌 Giscus**，改显示「本页评论在正文底部」+ 一个跳转按钮 |
+| 其他页面（首页 / 列表 / 关于 / 联系…） | 右侧留言板是**全站留言板**：一条名为「留言板」的固定 Discussion（`mapping: "specific"`） |
+
+如果强行在同一页挂两个，表现就是「留言板里显示了某篇文章的评论」—— 这不是配置写错，
+而是第二个实例复用了第一个的容器。
+
+**登录只需要一次**：会话按站点存在 `localStorage`（键 `giscus-session`），
+同一个域名下各篇文章的评论区与留言板**共用同一个登录**；
+换账号在评论区内部的「退出登录」里操作即可。
+（`localhost` 和线上域名是**不同的源**，各自登一次是正常的。）
+
+细节见 [评论系统](#评论系统)。
 
 ### 为什么不直接用一个现成的第三方计数器
 
@@ -989,47 +1035,78 @@ push 之后 Cloudflare 重新构建，对所有访客生效。
 结论：**能同时满足「免费、不会倒闭、国内可访问、不需要常驻服务器」的只有一条路 ——
 把几十行代码部署到你已经用着的 Cloudflare 上。** 厂商（Cloudflare）不会倒，
 代码和数据都在你自己的账号里，最坏情况下也只是自己重新部署一次。
-源码就在 [`workers/blog-api/`](workers/blog-api/)，独立部署、与博客构建互不影响。
+本站把它放在 **Pages Function** 里（`functions/`），连「另一个 Worker 项目」都省了。
 
-### 部署统计后端（一次性，约 5 分钟）
+---
+
+## 浏览量的后端：Pages Function + D1
+
+源码就是仓库根的 [`functions/api/[[route]].js`](functions/api/%5B%5Broute%5D%5D.js)，只有两个接口：
+
+| 接口 | 作用 |
+| --- | --- |
+| `GET /api/stats?path=<slug>` | 读浏览数（不存在返回 `{"views":0}`） |
+| `POST /api/hit` `{"path":"<slug>"}` | 计数 +1，返回最新数字 |
+
+四个刻意的选择：
+
+1. **挂在 Pages 而不是单独 Worker** —— `functions/` 跟着站点一起构建部署，不用再维护第二个项目
+2. **与页面同源**（`/api`）—— 省掉跨域，也不会因为某个 `*.workers.dev` 域名连不上而失败
+3. **用 D1 而不是 KV** —— 见下面的对比
+4. 表结构**首次请求自动创建**（`CREATE TABLE IF NOT EXISTS`，幂等），不用手动迁移
+
+### 为什么换掉了旧的 Worker + KV
+
+仓库里的 `workers/blog-api`（Worker + KV）能跑，但它恰好是「访问一上来就崩」的那一档：
+
+| | Workers KV（旧） | **D1（现在）** |
+| --- | --- | --- |
+| 免费写入额度 | **1,000 次 / 天** —— 超出后 `/hit` 直接报错 | **100,000 行 / 天** |
+| 并发自增 | ❌ 没有事务，「读 → 改 → 写」会丢计数 | ✅ `count = count + 1` 原子自增 |
+| 部署形态 | 独立的 Worker 项目 + KV 命名空间 | **跟站点一起部署** |
+| 接口地址 | `https://xxx.workers.dev`（跨域） | `/api/*`（**同源**） |
+| 要维护的东西 | Worker 代码 + KV + CORS 白名单 | 一个 D1 绑定 |
+
+### 部署（一次性，约 3 分钟）
 
 ```bash
-npm install -g wrangler
-wrangler login
-
-cd workers/blog-api
-wrangler kv namespace create BLOG_KV
-# 输出里有 [[kv_namespaces]] binding/id 两行，把它取消注释并填进 wrangler.toml
-wrangler deploy
+# ① 创建 D1 数据库（输出里的 database_id 记下来）
+npx wrangler d1 create hc-blog-views
 ```
 
-部署完会得到一个地址，例如 `https://hc-blog-api.你的子域.workers.dev`。
-把它写进 [content/site-settings.json](content/site-settings.json)：
+② Cloudflare Dashboard → **Workers & Pages → 你的 Pages 项目 → Settings → Functions →
+D1 database bindings** → 新增一条：
+
+- **Variable name**：`BLOG_DB`（必须一字不差，代码里写死了）
+- **D1 database**：选刚创建的 `hc-blog-views`
+
+③ **重新部署**：往 `main` 推一次，或在该项目的 Deployments 里点 “Retry deployment”。
+
+④ 让前端开始用它 —— [content/site-settings.json](content/site-settings.json)：
 
 ```json
 "interactions": {
   "provider": "remote",
-  "apiBase": "https://hc-blog-api.你的子域.workers.dev"
+  "apiBase": "/api"
 }
 ```
 
-push 之后重新构建，浏览量、点赞、评论就都是全站的了（刷新页面就能看到，不必等构建）。
+完整说明（免费额度、验证命令、本机怎么联调）都在
+[functions/README.md](functions/README.md)。
 
-细节都写在 [workers/blog-api/README.md](workers/blog-api/README.md) 里，包括：
+### 边界要说清楚
 
-- 免费额度（Workers 10 万请求/天、KV 读 10 万/天 + 写 1000/天）
-- 站长身份怎么校验（用你写文章那一个 GitHub Token）
-- **KV 没有事务**：同一瞬间的并发写会互相覆盖，计数可能少量丢失。
-  对个人博客完全够用，但它不是精确的计数系统，这里如实说明
-- `/hit` 没有做防刷：浏览量可以被脚本刷。要防就得引入验证码或更复杂的限流，
-  对个人博客不划算
+- `POST /api/hit` **没有鉴权**，任何人都能刷 —— 浏览量本来就是个模糊指标，
+  不承诺精确、也不防刷。要防就得上验证码或更复杂的限流，个人博客不划算。
+- `path` 只允许 `[A-Za-z0-9._-]`、长度 ≤ 160（前端已把中文 slug 归一化成 `x-<hex>`）。
+- 接口只存「path → 次数」，不存任何个人信息。
+- 未绑定 D1 时返回 `503`，前端退回本机计数。
+- 本机 `npm run dev` 没有 Pages Function，`/api` 会 404 —— 前端同样退回本机计数并标注「（本机）」，
+  **这是预期行为，不是 bug**。想在本机联调可以用
+  `npx wrangler pages dev out --d1 BLOG_DB`。
 
-### 把自己的域名限制进 CORS（可选）
-
-Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
-想收紧就把 [workers/blog-api/wrangler.toml](workers/blog-api/wrangler.toml) 里的
-`ALLOWED_ORIGIN` 改成你的域名，再 `wrangler deploy` 一次。
-（改完之后，本地 `npm run dev` 的 `localhost:3000` 会被 CORS 挡掉，需要临时改回来。）
+> 旧的 `workers/blog-api` 保留在仓库里没删：它带的是**页面内的评论与站长回复**
+> （本站这两件事已经交给 Giscus）。想要那套的人可以读它自己的 README。
 
 ---
 
@@ -1050,70 +1127,77 @@ Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
 所以：**文章确实只有仓库主人写得了。**
 仓库里已经内置了 Giscus 的接入代码，本站
 [content/site-settings.json](content/site-settings.json) 里的 `giscus` 已配置并启用，
-**文章底部与右侧留言板都走 Giscus**：任何有 GitHub 账号的人都能评论 / 留言 ——
+**评论与留言统一走 Giscus**：文章底部是这篇文章自己的讨论，
+非文章页的右侧留言板是全站留言板 —— 任何有 GitHub 账号的人都能评论 / 留言，
 此时就**不是**只有主人能写了。
 （代码里的默认值仍是 `null`：fork 这个项目后，需要按下面步骤自行配置，
 并把 Giscus App 装到自己的仓库上；没配时文章底部退回本机评论。）
 
 ### 二、访客的留言 / 评论，站长怎么回？
 
-回复入口只在**站长模式**下出现。判定站长的方式很朴素：
-**本机浏览器里存着能写仓库的 GitHub Token**，那它就是站长 ——
-和写文章、传图片用的是同一个凭据，不需要再发明一套登录系统。
+**本站不需要「在页面里回复」这套流程了** —— 评论就是 GitHub Discussions，
+站长直接在那儿回：
 
-**操作步骤（3 步）**
+1. 打开仓库的 **Discussions**，找到那条讨论（每篇文章一条；留言板是名为「留言板」的那条）
+2. 在评论下方点 **Reply**，写内容、保存
+3. **立刻对所有访客生效** —— 不用重新构建，也不用任何 token
 
-1. 打开右上角 **设置 → 展开「GitHub Token 配置」**，填入 fine-grained token
-   （只授权这一个仓库、只给 `Contents: Read and write`，见
-   [配置 GitHub Token](#配置-github-token走第-2-条路才需要)）
-2. 到留言板或文章底部的评论区，每条留言右下角会出现 **「回复」** 按钮；
-   点开写内容、点「发布回复」
-3. 等 1–2 分钟重新构建完成，**所有访客**都能看到这条回复
+比在页面上回复更好的地方：**GitHub 会给站长发通知**，而且回复是 GitHub 原生的
+（支持 Markdown、@ 提醒、表情反应、编辑与删除）。
 
-回复写到哪儿，取决于 `interactions.provider`：
-
-| provider | 回复存到哪 | 谁看得见 | 生效时间 |
-| --- | --- | --- | --- |
-| `"remote"`（部署了互动服务） | Worker 的 KV | 所有人 | **立即**（评论本身也是全站可见的） |
-| `"local"`（默认） | 提交进仓库的 `content/comments.json` / `guestbook.json` | 所有人 | 重新构建后（约 1–2 分钟） |
-
-两条路上的**权限都是服务端强制的**，不是「把按钮藏起来」：
-
-- 写仓库文件本来就必须有仓库写权限，没有 token 根本提交不上去
-- 互动服务会拿 token 去问 GitHub「这个 token 对这个仓库有 push 权限吗」，
-  不是站长就返回 `403 只有站长可以回复或删除评论`，且**一个字节都不写**
+> **没配 Giscus 时**（代码默认值 `null`）才走老流程：回复按钮只在**站长模式**下出现，
+> 判定方式很朴素 —— **本机浏览器里存着能写仓库的 GitHub Token**，那它就是站长，
+> 和写文章、传图片用的是同一个凭据，不需要再发明一套登录系统。
+> 三步：① 打开右上角 **设置 → 展开「GitHub Token 配置」**，填入 fine-grained token
+> （只授权这一个仓库、只给 `Contents: Read and write`，见
+> [配置 GitHub Token](#配置-github-token走第-2-条路才需要)）；
+> ② 留言板 / 评论区每条右下角出现 **「回复」**，点开写内容、点「发布回复」；
+> ③ 等 1–2 分钟重新构建完成，**所有访客**都能看到。
+>
+> 这时回复写进 `content/comments.json` / `guestbook.json`，权限是**服务端强制**的：
+> 没有仓库写权限根本提交不上去，不是「把按钮藏起来」。
 
 ### 三、访客的评论存在哪里？站长看不到怎么办
 
-这是纯静态站最需要说清楚的一条边界：
+这是纯静态站最需要说清楚的一条边界，而**本站的答案已经变了**：
 
-| provider | 访客的评论 | 站长能不能看到 |
+| 评论通道 | 访客的评论在哪 | 站长能不能看到 |
 | --- | --- | :---: |
-| `"local"` | 只写进访客自己的 `localStorage` | ❌ **看不到**，所以也就回不了 |
-| `"remote"` | 写进互动服务的 KV | ✅ 能看到、能回复 |
+| **Giscus（本站启用）** | 写在仓库的 **GitHub Discussions** 上 | ✅ **看得到**，还会收到 GitHub 通知，直接在里面回复 |
+| 本机评论（没配 Giscus 时的兜底） | 只写进访客自己的 `localStorage` | ❌ **看不到**，所以也就回不了 |
 
-纯静态站没有「收件箱」——**访客提交的内容没有任何通道能被站长收到**。
-想让「访客评论 → 站长回复」真正闭环，只有三条路：
+所以：**配好 Giscus 之后，「访客评论 → 站长回复」这个闭环就成立了**，
+不需要任何自建后端 —— 这是本站把评论统一到它的主要原因。
 
-1. **部署互动服务**（推荐）：访客发完所有人立刻可见，站长在页面上直接回复
-2. **配置 Giscus**：访客用 GitHub 账号评论，站长在仓库的 Discussions 里回复。
-   这是 GitHub 原生功能，评论下方自带 Reply。
-   配置见 [推荐方案：Giscus](#推荐方案giscus)
-3. **走邮件**：留言板里就是这么提示访客的 —— 想做真正的交流就发邮件
+没配 Giscus 才是那句老实话：纯静态站没有「收件箱」，
+**访客提交的内容没有任何通道能被站长收到**。那时只剩三条路 ——
+① 配置 Giscus（推荐）；② 部署 `workers/blog-api`（**旧方案**：Worker + KV，能在页面里直接回复，
+本站已不用 —— 它的写入额度与事务限制见下节）；③ 走邮件。
 
 ### 四、留言板和文章评论区有什么区别
 
-两者共用同一套逻辑与权限模型（`useCommentThread` + `CommentThreadView`），
-只是位置和数据文件不同：
+走 Giscus 之后，两者的差别只剩「挂在哪个讨论上」和「什么时候出现」：
 
 | | 右侧留言板 | 文章底部评论区 |
-| --- | --- | --- |
+| --- | --- | :---: | :---: |
 | 面向 | 站点整体的一句话 | 某一篇文章的讨论 |
-| 公开留言存到 | `content/guestbook.json` | `content/comments.json` |
-| 互动服务里的 path | `guestbook` | 文章 slug |
-| 面板里的「清空本机留言」 | 只删**你自己浏览器**里的，**不会**动仓库里站长发布的那些 | 同左 |
+| 对应的 Discussion | 名为「留言板」的那一条（`mapping: "specific"`） | 按 `pathname` 映射的那一条 |
+| 在文章页 | 显示「本页评论在正文底部」+ 跳转按钮（**一页只能有一个 giscus 实例**） | ✅ 正常显示 |
+| 在其他页面（首页 / 列表 / 关于 / 联系…） | ✅ 显示全站留言板 | ——（不是文章页） |
+
+两者的讨论都在**同一个仓库的 Discussions** 里，数据随时能导出；
+登录也只需一次 —— 同一个域名下它们共用同一个 GitHub 登录会话。
+
+> 没配 Giscus 时，两者共用同一套本机逻辑（`useCommentThread` + `CommentThreadView`），
+> 只是数据文件不同：留言板写 `content/guestbook.json`，文章评论写 `content/comments.json`；
+> 面板里的「清空本机留言」只删**你自己浏览器**里的那一份，不会动仓库里站长发布的那些。
 
 ### 五、公开留言 / 评论文件长什么样
+
+> 这一节讲的是 **`content/guestbook.json` 与 `content/comments.json` 这两个仓库文件**，
+> 它们只在**没配 Giscus** 时才承担评论展示 —— 本站启用 Giscus 后，
+> 评论与留言都在 GitHub Discussions 里，这两个文件不再参与前台。
+> 保留这段是为了想用「仓库文件 + 构建期注入」这条纯离线链路的人。
 
 两个文件都是「手改也安全」的：字段类型不对的那一条会被丢掉并打一行警告，
 **不会让构建失败**（和 `site-settings.json` 一样是逐条/逐字段校验）。
@@ -1154,12 +1238,14 @@ Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
 | --- | --- |
 | `id` | 唯一标识；**前后端用同一个 id 去重**，所以站长回复后不会出现两条 |
 | `author` / `content` / `createdAt` | 展示用；`createdAt` 由服务端覆盖成服务器时间 |
-| `likes` | 仓库里的基线（互动服务模式下由 KV 记） |
+| `likes` | 仓库里的点赞基线（部署了**旧**互动服务时由 KV 记；本站改用 Giscus 后，文章头部的「N 个赞」读的是 GitHub 反应数，与这个字段无关） |
 | `reply` / `replyAt` | **站长回复**，只有站长能写 |
 | `owner: true` | 这条是站长自己发的（留言板里会带一个「站长」徽标） |
 
 > 评论里的那个心形按钮**只记在本机**：它属于「顺手点一下」的交互，
-> 为它单独走一次后端请求不划算。点赞文章的那个才是全站计数。
+> 为它单独走一次后端请求不划算。
+> 文章头部的「N 个赞」才是全站计数 —— 本站启用 Giscus 后，它读的是评论区那条
+> Discussion 上的 GitHub 反应数（见[三个数字，三个来源](#三个数字三个来源)）。
 
 ---
 
@@ -1174,7 +1260,12 @@ Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
 | 位置 | 是什么 | 谁能看到 | 谁能回复 |
 | --- | --- | --- | --- |
 | 文章底部 | 按文章路径（`pathname`）映射的 GitHub Discussion，**本站已启用** | 所有访客，需要 GitHub 账号 | 站长和任何人在 Discussions 里回复 |
-| 右侧留言板 | 绑定到「留言板」这条 Discussion 的 Giscus（`specific` 映射） | 所有访客，需要 GitHub 账号 | 同上 |
+| 右侧留言板（非文章页） | 绑定到「留言板」这条 Discussion 的 Giscus（`specific` 映射） | 所有访客，需要 GitHub 账号 | 同上 |
+| 右侧留言板（文章页） | 不内嵌 Giscus —— 改显示「本页评论在正文底部」+ 跳转按钮 | —— | —— |
+
+第三条是**故意的**：giscus 的 `client.js` 会复用页面上第一个 `.giscus` 容器，
+且 iframe 的高度消息不带发送方标识，**所以一个页面只能有一个实例**。
+强行挂两个的表现就是「留言板显示了某篇文章的评论」。
 
 文章与留言板的评论都落在仓库的 Discussions 里、对所有访客可见，数据可随时导出。
 没配 Giscus 时（代码默认 `null`）会退回「本机评论 + 站长发布」的老逻辑。
@@ -1199,8 +1290,14 @@ Worker 默认 `ALLOWED_ORIGIN = "*"`，也就是任何网站都能调它。
 - **零维护** —— 不用管数据库、不用管反垃圾、不用管证书
 - **客户端渲染** —— iframe 懒加载，不影响静态导出的首屏
 
-代价也说清楚：**评论者需要有 GitHub 账号**。对技术博客通常不是问题；
-但如果读者大多没有 GitHub 账号，就得选 Waline 那一类（要自己部署，但可匿名）。
+代价也说清楚，**三条**：
+
+1. **评论者需要有 GitHub 账号**。对技术博客通常不是问题；
+   但如果读者大多没有 GitHub 账号，就得选 Waline 那一类（要自己部署，但可匿名）。
+2. **一个页面只能挂一个实例**（原因见上一张表），所以文章页的留言板要让位给正文评论。
+3. 评论框是**跨域 iframe**：改成页面样式（字体、圆角）只能整套替换它的主题 CSS，
+   维护成本不小；自定义光标也无法跟随到 iframe 内部（浏览器同源隔离，
+   代码只能做到「进 iframe 时隐藏自定义光标」）。
 
 ### 关于「用户评论后直接提交到你的仓库」
 
@@ -1239,15 +1336,29 @@ Giscus 之所以没这些问题，是因为它走的是 **GitHub OAuth App**：
 ```
 
 5. 安装 Giscus App：<https://github.com/apps/giscus> → Install → 选择这个仓库
+   （**这一步不能省**：没装 App 时 iframe 会提示 “giscus is not installed”）
 6. push，等重新构建完成，文章底部就会出现评论区
 
 > `mapping` 决定「哪篇文章对应哪个 discussion」，默认 `pathname` 够用。
 > 但文章 URL 变了会对应不上——旧评论还在，只是挂到了新的 discussion 下。
 
-### 主题同步
+拿到两个 ID 的最快方式其实不用填表：`repoId` 和 `categoryId` 都能用 GitHub API 取
+（`repository { id }` 与 `discussionCategories { nodes { id name } }`），
+Discussions 也能直接 `PATCH` 打开。
 
-评论区自动跟随站点的深色/浅色：切主题时通过 `postMessage` 通知 iframe 换配色，
-不会整块重新加载。
+### 登录与配色
+
+**登录一次，全站通用**：会话按站点存在 `localStorage`（键 `giscus-session`），
+同一个域名下各篇文章的评论区与留言板**共用同一个登录**。
+换账号在评论区内部的「退出登录」里操作即可 —— 这是 iframe 内的功能，
+页面外面接管不了它的 OAuth。
+（`localhost` 与线上域名是**不同的源**，各自登一次是正常的。）
+
+**配色跟随深色 / 浅色**：切主题时用 `postMessage` 通知 iframe 换配色，不整块重新加载。
+iframe 是懒加载 + 异步插入的，所以这份同步不会只在挂载那一次做 ——
+它会在 iframe 就绪后再补发一次，避免「深色页面里评论框是浅色」。
+另外只要配了 Giscus，页面 `<head>` 就会带上 `giscus.app` 的
+`preconnect` / `dns-prefetch`，省一次握手。
 
 ---
 
@@ -1279,6 +1390,10 @@ out/
 
 > 因为每个路由都有独立的 `index.html`，**所有平台都不需要写 rewrite 规则**。
 > 这是当初选 `trailingSlash: true` 的主要理由。
+>
+> 还有一件事要提前知道：**只有 Cloudflare Pages 能带上 `functions/` 这个浏览量后端**。
+> GitHub Pages / Nginx / Docker 这类纯静态托管跑不了它 ——
+> 那时浏览数会退回「本机计数」并在界面上标注「（本机）」，其余功能不受影响。
 
 ### 方案一：Cloudflare Pages（推荐）
 
@@ -1325,7 +1440,21 @@ Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** →
 
 大约 1～2 分钟。成功后 Cloudflare 会给你一个 `xxx.pages.dev` 的地址。
 
-**6. 自定义域名（可选）**
+**6. 绑定 D1 数据库（可选，约 3 分钟）—— 想要全站浏览数才需要**
+
+```bash
+npx wrangler d1 create hc-blog-views
+```
+
+然后 Pages 项目 → **Settings → Functions → D1 database bindings** → 新增一条：
+**Variable name** 必须是 `BLOG_DB`（代码里写死了），**D1 database** 选刚创建的那个库，
+最后重新部署一次。再把 [content/site-settings.json](content/site-settings.json) 的
+`interactions` 改成 `{ "provider": "remote", "apiBase": "/api" }`。
+完整说明见 [浏览量的后端：Pages Function + D1](#浏览量的后端pages-function--d1)。
+
+**不做这一步站点照样能跑** —— 只是浏览数显示「（本机）」，不会报错也不会白屏。
+
+**7. 自定义域名（可选）**
 
 Pages 项目 → **Custom domains** → 添加你的域名 → 按提示去 DNS 加一条 `CNAME`。
 CF 托管的域名会自动配好证书；域名不在 CF 的话，先把 NS 转过来最省事。
@@ -1545,10 +1674,13 @@ docker build \
 | 访问 `/search-index.json` | 返回 JSON，`count` 等于线上文章数（不含草稿） |
 | 改一下 `content/site-settings.json` 再构建 | 首屏的主题/字号/壁纸跟着变（说明站点默认值生效） |
 | 桌面端点留言区的 × | 面板收起（**曾经失效，已修**） |
-| 留言板能看到 3 条公开留言 | 其中一条带「站长」徽标、一条带站长回复 |
-| 打开一篇文章 | 头部有「— 次浏览」占位，底部有评论区与输入框 |
-| 刷新文章页几次 | 浏览量会涨；点一下心形会变红并 +1（默认模式下标题写的「（本机）」） |
-| 配好 GitHub Token 后打开一篇文章 | 每条评论右下角出现「回复」按钮 |
+| 首页等非文章页点开留言板 | 是全站留言板（Giscus），登录 GitHub 后可留言 |
+| 打开一篇文章 | 头部先是浏览/点赞的占位「—」，很快换成真实数字；底部有 Giscus 评论区 |
+| 刷新文章页几次 | 浏览数每次 +1；绑好 D1 后**没有**「（本机）」字样 |
+| 在文章页点开右侧留言板 | 显示「本页评论在正文底部」+ 跳转按钮（一页只有一个 giscus 实例） |
+| 在评论区给讨论点个赞 👍 | 文章头部的点赞数跟着变（读的是 GitHub 反应数） |
+| 从标签详情页点进一篇文章 | 顶部「返回」写的是「返回该标签的文章」，点回去正好是那个标签列表 |
+| `curl https://<域名>/api/stats?path=hello-world` | 返回 `{"views":N}`；404 / 503 说明 Pages Function 或 D1 还没生效 |
 | 有 `cover` 的文章 | 列表页那张卡片是图片背景，文章页顶部也有大图 |
 | 正文里有图的文章 | 列表页卡片底部有一条缩略图带 |
 | 按 `⌘K` / `Ctrl+K` | 搜索弹窗打开，输入关键词能出结果 |
@@ -1607,38 +1739,48 @@ GitHub 原始地址顶着显示，所以不会白屏。
 403 是权限不足，需要 `Contents: Read and write`。
 
 **文章底部没有 Giscus 评论区**
-Giscus 需要 `content/site-settings.json` 里 `giscus` 配置完整
-（`repo` / `repoId` / `category` / `categoryId` 四个都不能少），
-并且仓库开启了 Discussions、装过 Giscus App。
-**注意这是刻意默认关闭的** —— 顶部那个评论区（本机 / 互动服务）不受它影响。
+按顺序查三件事：① `content/site-settings.json` 里 `giscus` 配置是否完整
+（`repo` / `repoId` / `category` / `categoryId` 四个都不能少）；
+② 仓库 Settings → Features 里 **Discussions 开了吗**；
+③ <https://github.com/apps/giscus> 的 App **装到这个仓库了吗**（没装时 iframe 会提示
+“giscus is not installed”）。
+代码里的默认值是 `null`，所以 fork 之后默认确实不会出现评论区 —— 这是刻意的，那时会退回本机评论。
 
 **浏览量一直显示「（本机）」**
-说明 `interactions.provider` 还是 `"local"`。想变成全站数字，
-部署 `workers/blog-api` 后把 `provider` 改成 `"remote"`、填上 `apiBase`，见
-[部署统计后端](#部署统计后端一次性约-5-分钟)。
+说明后端没接通，按这个顺序查：① `content/site-settings.json` 里是不是
+`{ "provider": "remote", "apiBase": "/api" }`；② Pages 项目的
+**Settings → Functions → D1 database bindings** 里有没有变量名为 `BLOG_DB` 的绑定；
+③ 浏览器控制台看 `/api/stats` 的状态码 —— `503` 就是 D1 没绑好，`404` 说明
+这次部署没有带上 `functions/`；④ 本机 `npm run dev` 本来就没有 Pages Function，
+显示「（本机）」是预期的。
+详见 [浏览量的后端：Pages Function + D1](#浏览量的后端pages-function--d1)。
 
-**配了 `apiBase` 但数字没变，控制台一堆 CORS 报错**
-三个地方按顺序查：① `apiBase` 结尾有没有多余的 `/`（代码会容错，但值得看一眼）；
-② `wrangler.toml` 里的 `ALLOWED_ORIGIN` 是不是被改成了某个域名，
-导致你当前的域名不在白名单里；③ 浏览器控制台里那条请求的实际状态码 ——
-`500 服务端异常` 通常意味着 KV 绑定没配好（`wrangler.toml` 里那段是注释状态）。
+**配了 `apiBase` 却出现跨域 / 请求失败**
+本站的浏览数接口是**同源**的 `/api`（Pages Function），本来就不存在跨域。
+如果你填的是某个 `https://xxx.workers.dev`（旧的 Worker 方案）才会遇到 CORS，
+那是 Worker 的 `ALLOWED_ORIGIN` 白名单没放行当前域名。
+用 `/api` 却失败的话，看 `/api/stats` 的状态码：`503` = D1 没绑好，
+`404` = 这次部署没带上 `functions/`。
 
-**点赞了刷新就没了**
-默认 `local` 模式下点赞本来就只有本机（而且"取消点赞"会把数字减回去）；
-`remote` 模式下如果刷新后丢，多半是 KV 写入失败或请求被 CORS 挡了，
-看控制台里 `/like` 的响应。
+**文章头部的点赞数一直是占位符「—」**
+它读的是评论区那条 Discussion 上的 **GitHub 反应数**，
+要等 giscus iframe 加载完成后才有值。一直不出现就查三处：① 评论区本身渲染出来了吗；
+② 那条 discussion 创建了没（第一条评论发出后才会创建）；
+③ giscus 版本太旧不支持 `data-emit-metadata`。
+没配 Giscus 时用的是本机点赞，本来就只有这台电脑有 —— 那是预期行为。
 
-**站长回复提交成功了，但页面上还是旧样子**
-正常现象。`provider: "local"` 时回复是**提交进仓库**的，
-要等 Cloudflare 重新构建（约 1–2 分钟）才会出现在所有人的页面上；
-你本机会先看到一条带「待构建」标记的临时版本。
-想立刻生效就部署互动服务，回复会直接写进 KV。
+**站长回复了，但页面上还是旧样子**
+启用 Giscus 后回复是**立刻生效**的（评论本来就在 Discussions 上），刷新即可看到。
+只有**没配 Giscus** 时才走「提交进仓库」那条路 —— 那时要等 Cloudflare 重新构建
+（约 1–2 分钟）才会出现在所有人的页面上，你本机会先看到一条带「待构建」标记的临时版本。
 
 **点「回复」没反应 / 提示「只有站长可以回复或删除评论」**
-说明当前浏览器里的 GitHub Token 不对。互动服务会拿这个 token 去问 GitHub
-「你对这个仓库有 push 权限吗」，用的是仓库详情接口的 `permissions.push`。
+这条只在「没配 Giscus + 部署了 `workers/blog-api`」时出现：服务会拿浏览器里的
+GitHub Token 去问 GitHub「你对这个仓库有 push 权限吗」（看仓库详情的
+`permissions.push`），不是站长就返回 403 且一个字节都不写。
 检查：token 是不是 **fine-grained**、有没有勾中这一个仓库、
 有没有给 `Contents: Read and write`。
+本站启用 Giscus 之后不在这个流程里 —— 回复直接在 GitHub Discussions 里做。
 
 **列表页卡片的缩略图 404，但点进文章图是好的**
 两者的地址由同一个 `resolveImageSrc()` 生成，理论上不会不一致。
@@ -1710,27 +1852,30 @@ node -e "console.log(require('os').tmpdir())"   # 看看系统临时目录在哪
 | 自定义壁纸 | ✅ | 7 套预设 + **直传仓库** + 只存本机，可调强度与模糊 |
 | 站点默认值 | ✅ | 存仓库的 `content/site-settings.json`，构建期注入，首屏即生效 |
 | 深浅色主题 | ✅ | 跟随系统 / 浅色 / 深色，无闪屏 |
-| **浏览量 / 点赞** | ✅ | 默认只统计本机（零配置）；部署 `workers/blog-api` 后变成全站真实数字 |
+| **浏览数** | ✅ | Cloudflare **Pages Function + D1**（同源 `/api`）；没绑 D1 时退回本机并标注「（本机）」 |
+| **文章点赞** | ✅ | 评论区那条 Discussion 上的 **GitHub 反应数** —— 真实全站，计数存在 GitHub 侧，不怕突发流量 |
 | **评论区** | ✅ | 走 Giscus（GitHub Discussions）：文章底部 + 右侧留言板，登录 GitHub 即可评论 |
 | **留言与评论的回复** | ✅ | 在 GitHub Discussions 里回复；数据与文字都在自己的仓库里，可随时导出 |
 | **列表页缩略框配图** | ✅ | `cover` 当卡片背景；没有封面时自动展示正文前 4 张图的缩略图带 |
 | Giscus 评论 | ✅ | 已接入并**在本站启用**：文章底部与留言板都用它（代码默认值仍为 `null`，fork 需自行配置 + 装 App） |
-| 后端 API | ⬜ | 纯静态方案；只有可选的互动服务（Workers + KV）算半个后端 |
-| 精确的阅读量 | ⬜ | KV 没有事务，并发写会覆盖；要精确得上 D1 + 事务 |
-| 浏览量的防刷 | ⬜ | `/hit` 谁都能调，可以被脚本刷；个人博客不做这个投入 |
+| 后端 API | ⬜ | 纯静态方案；只有一个同源的浏览量接口（Pages Function + D1）算半个后端 |
+| 并发下的精确计数 | ✅ | D1 用 `count = count + 1` 原子自增，不会互相覆盖 |
+| 浏览量的防刷 | ⬜ | `/api/hit` 没有鉴权，可以被脚本刷；浏览量本就是模糊指标，个人博客不做这个投入 |
 
 ### 已知取舍
 
 - **访客偏好不跨设备**：这是有意的设计，不是缺陷。访客偏好存 `localStorage`，
   站点默认值存仓库 —— 想让某个设置跟着自己走，就把它保存成站点默认值。
-- **默认不部署互动服务时，留言与评论只存在本机 `localStorage`**，
-  站长看不到，也就回复不了。界面上如实写明了这一点，
-  并且给了三条出路（部署互动服务 / 配置 Giscus / 发邮件）。
-- **回复一律只有站长能做**，这是刻意的：让任意访客写入「对所有人可见」的内容，
-  就必须把仓库写权限发出去或引入一个后端 —— 前者不可接受，后者就是互动服务。
-  详见 [留言与评论怎么回复](#留言与评论怎么回复)。
-- **互动服务的计数不是精确值**：KV 没有事务，高并发下会互相覆盖。
-  对个人博客够用，但不承诺精确。
+- **没配 Giscus 时，留言与评论只存在本机 `localStorage`**，站长看不到、也回复不了。
+  界面上如实写明了这一点，并给了出路（配置 Giscus / 部署互动服务 / 发邮件）。
+  本站已启用 Giscus，所以评论与留言都在 GitHub Discussions 上，站长**看得到、回得了**。
+- **回复的身份交给 GitHub 把着**：评论就是 Discussions，站长在那里回复（会收到通知），
+  任何有 GitHub 账号的人也能接力回复 —— 但**没人能冒充站长**，因为身份由 GitHub 鉴权。
+  没配 Giscus 时才有「只有站长能回复」那条老规则：回复写进仓库文件，
+  没有仓库写权限就提交不上去。详见 [留言与评论怎么回复](#留言与评论怎么回复)。
+- **浏览数的后端是可选的**：没绑 D1 就显示「（本机）」，页面照样能用。
+  旧方案用的 Workers KV 没有事务、每天只有 1000 次写 —— 那才是「访问一上来就崩」的原因，
+  换成 Pages Function + D1 就是为了解决它（10 万写/天、自增原子、与页面同源）。
 - 搜索是**子串匹配**：中文长句会被当成一个词，建议用较短的词或空格分词。
   要做到真正的分词检索，得上 Pagefind 这类专门的方案。
 - **Giscus 需要 GitHub 账号**才能评论。要匿名评论就得换成 Waline 一类
