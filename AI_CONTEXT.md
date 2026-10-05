@@ -16,7 +16,7 @@
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
 | 内容在哪 | `content/posts/*.md(x)`（frontmatter + 正文），**这是唯一的内容真相来源**。`.md` 与 `.mdx` **等价**，都走 MDX 管线 |
 | 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
-| 公开留言/评论 | `content/guestbook.json` + `content/comments.json`（只有站长能写，构建期读取） |
+| 公开留言/评论 | 走 **Giscus**（GitHub Discussions，配置在 `site-settings.json` 的 `giscus`）；`content/guestbook.json` + `comments.json` 只在**没配 Giscus** 时作为本机兜底 |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
 | 可选后端 | `workers/blog-api/`（Cloudflare Worker + KV：浏览量/点赞/评论；**独立部署，不参与 next build**） |
 | 产物 | `out/`，部署到 Cloudflare Pages |
@@ -329,8 +329,8 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | 外壳（顶栏 + 三栏） | `src/components/BlogLayout.tsx` |
 | 顶栏按钮 | `src/components/TopBar.tsx` |
 | 左侧导航 | `src/components/Sidebar.tsx` |
-| 右侧留言板 | `src/components/MessagePanel.tsx` |
-| 文章底部评论区 | `src/components/PostInteractions.tsx` + `CommentThreadView.tsx` |
+| 右侧留言板 | `src/components/MessagePanel.tsx`（配了 Giscus 时内嵌 `GiscusComments`，绑定「留言板」Discussion） |
+| 文章底部评论区 | `src/components/PostInteractions.tsx`（配了 Giscus 只渲染 `GiscusComments`，否则退回 `CommentThreadView`） |
 | 文章页的浏览量与点赞 | `src/components/PostStatsBar.tsx` |
 | 互动数据存哪（本机 / 远程） | `content/site-settings.json` 的 `interactions` |
 | 站长回复写进仓库的格式 | `src/lib/repo-comments.ts` |
@@ -616,7 +616,8 @@ draft: false
 | 后端是本机还是全站 | `content/site-settings.json` 的 `interactions.provider` / `apiBase` |
 | 本机模式的存储与合并规则 | `src/lib/interactions.ts`（纯函数，优先在这里改，可以直接用 Node 验） |
 | 发表/回复/删除的编排 | `src/hooks/useCommentThread.ts` |
-| 评论区或留言板的排版 | `src/components/CommentThreadView.tsx`（两者共用） |
+| 本机评论/留言的排版（兜底时） | `src/components/CommentThreadView.tsx`（评论区与留言板共用） |
+| Giscus 评论区的接入 | `src/components/GiscusComments.tsx`（文章用 `pathname` 映射；留言板传 `mapping="specific"` + `term="留言板"`） |
 | 站长写进仓库的文件格式 | `src/lib/repo-comments.ts` + `src/lib/interactions-file.ts`（**读写两侧要同时改**） |
 | 服务端的权限校验、限流、上限 | `workers/blog-api/src/index.js`，改完要单独 `wrangler deploy` |
 
@@ -662,8 +663,8 @@ npx serve out          # 或 python -m http.server -d out 8080
 - 深色模式刷新有没有闪屏
 - 侧栏播放器能不能出声、切三种模式
 - 桌面端点留言区的 × 会不会收起
-- **留言板里那 3 条公开留言**（其中一条带「站长」徽标、一条带站长回复）是否在 HTML 里
-- 文章页头部有没有「— 次浏览」占位、底部有没有评论输入框
+- **留言板**：配了 Giscus 时面板里应出现 Giscus（HTML 里有「由 GitHub Discussions 提供」与底部 Discussions 链接），且**不再**有本机留言输入框
+- 文章页头部有没有「— 次浏览」占位；**底部只应有一条 Giscus 评论区**（HTML 里有「评论」标题，且不再有本机评论输入框）
 - **有 `cover` 的文章**：列表页卡片是不是图片背景、文章页顶部有没有大图
 - **正文有图的文章**：卡片底部有没有缩略图带（且代码块里的图没被算进去）
 
@@ -710,8 +711,8 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 **代码高亮（Shiki 双主题）** · **数学公式（KaTeX）** · 标签 / 归档 ·
 视频 / 音乐 · **自定义壁纸（含直传仓库）** · **站点默认值存仓库** ·
 深浅色主题 · **头像** · **列表页封面图与正文缩略图** ·
-**浏览量 / 点赞**（本机 / 全站两档） · **评论区（三条通道）** ·
-**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）** ·
+**浏览量 / 点赞**（本机 / 全站两档） · **评论区（Giscus：文章底部 + 留言板）** ·
+**Giscus 接入（本站已启用；代码默认未启用，未配时退回本机评论）** ·
 **资源按类型分目录**（图片 / 壁纸 / 音乐 / 歌词） · **悬浮歌词窗（可拖动缩放）** ·
 **Web Audio 音效（免费，默认关闭）**
 
@@ -723,7 +724,7 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 | 精确的阅读量 | 互动服务用的 KV 没有事务，并发写会互相覆盖；要精确得上 D1 |
 | 浏览量的防刷 | `/hit` 谁都能调，可以被脚本刷；个人博客不做这个投入 |
 | 代码块行号 / 行高亮 | Shiki 的 transformers 需要传函数，Turbopack 下不可用 |
-| 匿名的全站评论 | 默认模式的评论只在本机；全站可见要么部署互动服务，要么用 Giscus（需要 GitHub 账号） |
+| 匿名的全站评论 | 本站统一走 Giscus，需要 GitHub 账号；想要匿名评论得换 Waline 一类（那要部署服务） |
 
 ### 性能现状（实测）
 

@@ -73,26 +73,7 @@ export default function ContactPage() {
           关于留言板与评论区
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
-          点击右上角的留言图标可以打开右侧留言板，文章底部也有评论区，两者用法一样。
-          整站是纯静态导出的，没有服务端，所以<strong className="font-medium">你写下的留言与评论
-          默认只保存在你自己的浏览器里</strong>（localStorage），换设备就看不到了 ——
-          我这边也不会收到。
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
-          页面上带「站长」徽标、以及带站长回复的内容是例外：那些是我提交进仓库的，
-          <strong className="font-medium">所有访客都能看到</strong>，也只有我能写、能回复。
-          如果你想让自己的留言被所有人看到，最直接的方式是发邮件
-          <a
-            href={`mailto:${SITE.email}`}
-            className="mx-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
-          >
-            {SITE.email}
-          </a>
-          ，或者在 GitHub 上开一个 Issue。
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
-          想让「任何人评论、所有人可见、站长直接在页面上回复」真正跑起来，
-          需要两条外部通道之一：
+          点击右上角的留言图标可以打开右侧留言板，文章底部也有评论区 —— 两者都走
           <a
             href="https://giscus.app/zh-CN"
             target="_blank"
@@ -101,8 +82,22 @@ export default function ContactPage() {
           >
             Giscus
           </a>
-          （基于 GitHub Discussions，免费、不需要后端，但评论者要有 GitHub 账号），
-          或者仓库里自带的互动服务（Cloudflare Worker + KV）。
+          ，基于 GitHub Discussions：<strong className="font-medium">用 GitHub 账号登录后即可留言 / 评论</strong>，
+          内容对所有访客公开，我也会在 Discussions 里回复，也欢迎一起讨论。
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+          因为整站是纯静态导出的、没有服务端，评论数据直接保存在博客仓库的 Discussions 里，
+          随时可以导出，不存在「数据在别人家」的问题 —— 代价是留言需要登录 GitHub 账号。
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+          不想登录 GitHub 也没关系：可以发邮件
+          <a
+            href={`mailto:${SITE.email}`}
+            className="mx-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            {SITE.email}
+          </a>
+          ，或者在 GitHub 上开一个 Issue。
         </p>
       </section>
     </>

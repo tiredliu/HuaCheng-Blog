@@ -21,7 +21,7 @@ const STACK = [
   { layer: "内容格式", tech: "MDX", version: "—", note: "Markdown 里嵌 React 组件" },
   { layer: "代码高亮", tech: "Shiki", version: "4", note: "构建期着色，双主题零运行时" },
   { layer: "数学公式", tech: "KaTeX", version: "0.19", note: "构建期渲染，字体按需加载" },
-  { layer: "评论", tech: "本机 / 互动服务 / Giscus", version: "—", note: "默认零配置；全站公开评论需要部署一个可选 Worker" },
+  { layer: "评论", tech: "Giscus（GitHub Discussions）", version: "—", note: "文章与留言板都走它，需要访客有 GitHub 账号" },
   { layer: "托管", tech: "Cloudflare Pages", version: "—", note: "全球 CDN，国内速度较好" },
   { layer: "视频", tech: "Bilibili iframe", version: "—", note: "国内可直接播放，免流量" },
 ];
@@ -32,7 +32,7 @@ const CAPABILITIES = [
   { name: "国内访问速度", done: true, note: "Cloudflare CDN + 无外链字体与外链 JS" },
   { name: "代码高亮 / 公式", done: true, note: "Shiki 双主题 + KaTeX，都在构建期完成" },
   { name: "站内搜索", done: true, note: "构建期生成索引，支持按时间排序" },
-  { name: "评论与回复", done: true, note: "评论区 + 留言板；回复只有站长能做，写进仓库对所有人生效" },
+  { name: "评论与回复", done: true, note: "文章评论区与留言板都走 Giscus（GitHub Discussions），登录 GitHub 即可评论" },
   { name: "浏览量 / 点赞", done: true, note: "默认只统计本机；部署自带的 Cloudflare Worker 后是全站数字" },
   { name: "视频 / 音乐播放", done: true, note: "<BilibiliVideo /> 与侧栏播放器" },
   { name: "标签 / 归档", done: true, note: "标签页、标签详情、年份归档" },
