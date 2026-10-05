@@ -24,6 +24,19 @@ const GISCUS_SCRIPT = "https://giscus.app/client.js";
 const ORIGIN = "https://giscus.app";
 
 /**
+ * giscus 会把讨论元数据 postMessage 过来（需要脚本上带 `data-emit-metadata="1"`）。
+ * 我们把它转成一个 window 事件广播出去 —— 文章头部的「点赞」就用讨论里的
+ * **GitHub 反应数**：真实、全站共享，而且计数保存在 GitHub 侧，不怕突发流量。
+ */
+export const GISCUS_METADATA_EVENT = "hc-blog:giscus-metadata";
+
+export interface GiscusMetadata {
+  /** 讨论上的反应总数（👍 等） */
+  reactionCount: number;
+  totalCommentCount: number;
+}
+
+/**
  * Giscus 评论（基于 GitHub Discussions）。
  *
  * 为什么选它：
@@ -73,7 +86,7 @@ export function GiscusComments({
     }
     script.setAttribute("data-strict", "1");
     script.setAttribute("data-reactions-enabled", config.reactionsEnabled === false ? "0" : "1");
-    script.setAttribute("data-emit-metadata", "0");
+    script.setAttribute("data-emit-metadata", "1");
     script.setAttribute("data-input-position", config.inputPosition ?? "bottom");
     script.setAttribute("data-theme", isDark ? "dark_dimmed" : "light");
     script.setAttribute("data-lang", config.lang ?? "zh-CN");
@@ -123,6 +136,30 @@ export function GiscusComments({
 
     return () => observer.disconnect();
   }, [config, isDark]);
+
+  // giscus → 父页面：把讨论元数据（反应数、评论数）广播成 window 事件
+  useEffect(() => {
+    if (!config) return;
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== ORIGIN) return;
+      const giscus = (event.data as { giscus?: { discussion?: unknown } } | null)?.giscus;
+      const discussion = giscus?.discussion as
+        | { reactionCount?: unknown; totalCommentCount?: unknown }
+        | undefined;
+      if (!discussion) return;
+
+      const detail: GiscusMetadata = {
+        reactionCount: typeof discussion.reactionCount === "number" ? discussion.reactionCount : 0,
+        totalCommentCount:
+          typeof discussion.totalCommentCount === "number" ? discussion.totalCommentCount : 0,
+      };
+      window.dispatchEvent(new CustomEvent<GiscusMetadata>(GISCUS_METADATA_EVENT, { detail }));
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [config]);
 
   if (!config) return null;
 

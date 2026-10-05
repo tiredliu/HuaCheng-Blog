@@ -122,7 +122,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
             </span>
             <span>作者：{post.author}</span>
             {/* 浏览次数与点赞：数字只有浏览器知道，所以这里是客户端组件 */}
-            <PostStatsBar slug={slug} settings={siteSettings.interactions} />
+            <PostStatsBar
+              slug={slug}
+              settings={siteSettings.interactions}
+              likesFromGiscus={Boolean(siteSettings.giscus)}
+            />
           </div>
 
           {post.tags.length > 0 && (
