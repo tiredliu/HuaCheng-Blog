@@ -1069,10 +1069,14 @@ push 之后 Cloudflare 重新构建，对所有访客生效。
 
 ### 部署（一次性，约 3 分钟）
 
-```bash
-# ① 创建 D1 数据库（输出里的 database_id 记下来）
-npx wrangler d1 create hc-blog-views
-```
+① **建库**（两种都行）：
+
+- **Dashboard**：**Workers & Pages → D1 → Create**，名字填 `hc-blog-views`
+- **CLI**：`npx wrangler d1 create hc-blog-views`
+
+> Windows 上 `npx wrangler` 可能报 `The package "@cloudflare/workerd-windows-64" could not be found`
+> —— npx 漏装了它的平台二进制包。解决办法是 `npm i -g wrangler` 装一份本地的；
+> 或者干脆用上面那条 Dashboard 路径，建库这件事本来也不需要 CLI。
 
 ② Cloudflare Dashboard → **Workers & Pages → 你的 Pages 项目 → Settings → Functions →
 D1 database bindings** → 新增一条：

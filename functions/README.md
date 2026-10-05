@@ -11,28 +11,47 @@
 | 部署形态 | 单独的 Worker 项目 + KV | **跟站点一起部署**（仓库根的 `functions/`） |
 | 接口地址 | `https://xxx.workers.dev`（跨域） | `/api/*`（**同源**，无 CORS、无外域连通性问题） |
 
-## 部署步骤（约 3 分钟）
+## 部署步骤（约 3 分钟，两步：建库 → 绑定）
 
-```bash
-# ① 创建 D1 数据库（会打印 database_id，先记下来）
-npx wrangler d1 create hc-blog-views
+### 方案 A：全在 Dashboard 里点（不用装 wrangler，推荐）
 
-# ② 登录（如未登录）
-npx wrangler login
-```
+① **建库**：Cloudflare Dashboard → **Workers & Pages → D1 → Create**，
+名字填 `hc-blog-views`（随便取也行，绑定时选对即可）。
 
-③ 打开 **Cloudflare Dashboard → Workers & Pages → 你的 Pages 项目 → Settings → Functions → D1 database bindings**，
-新增一条绑定：
+② **绑定**：打开你的 **Pages 项目 → Settings → Functions → D1 database bindings → Add binding**：
 
-- **Variable name**：`BLOG_DB`（必须一字不差，代码里写死了）
+- **Variable name**：`BLOG_DB`（必须一字不差，代码里写死了这个名字）
 - **D1 database**：选刚创建的 `hc-blog-views`
 
-④ **重新部署**：往 `main` 推一次（或在该项目的 Deployments 里点 “Retry deployment”）。
+③ **重新部署**：往 `main` 推一次（或在该项目的 Deployments 里点 “Retry deployment”）。
+
+### 方案 B：用 wrangler CLI
+
+```bash
+npx wrangler login
+npx wrangler d1 create hc-blog-views   # 会打印 database_id
+```
+
+然后按方案 A 的 ②③ 去绑定并重新部署。
+
+> ⚠️ **Windows 上 `npx wrangler` 的常见报错**：
+> `Error: The package "@cloudflare/workerd-windows-64" could not be found`。
+> 这不是你的配置问题，而是 npx 临时安装时**漏掉了 workerd 的平台二进制包**
+> （它在 `optionalDependencies` 里）。别去修 npx 缓存，直接装一份本地的：
+>
+> ```bash
+> npm i -g wrangler              # 全局装一份最省事
+> # 或者不想全局装：npm i wrangler 之后用 node node_modules/wrangler/bin/wrangler.js ...
+> ```
+>
+> 装完再跑 `wrangler login` / `wrangler d1 create`。只是建个库的话，**方案 A 完全不需要 CLI**。
 
 > 表结构不用手动建：第一次请求时 `functions/api/[[route]].js` 会
 > `CREATE TABLE IF NOT EXISTS views(...)`（幂等，每个 isolate 只跑一次）。
 
-⑤ 让前端开始用它 —— `content/site-settings.json`：
+### 最后：让前端开始用它
+
+`content/site-settings.json`：
 
 ```json
 "interactions": {
@@ -59,7 +78,14 @@ curl -s -X POST "https://你的域名/api/hit" \
 
 本机预览（`npm run dev`）时没有 Pages Function，接口会 404 ——
 前端会**自动退回「本机计数」**并在界面上标注「（本机）」，页面不会出错。
-想在本机联调可以先让 `npx wrangler pages dev out --d1 BLOG_DB` 起一个带绑定的预览服务。
+想在本机联调，先 `npm run build:app` 生成 `out/`，再起一个带绑定的预览服务：
+
+```bash
+wrangler pages dev out --d1 BLOG_DB
+```
+
+（本机联调需要真跑 workerd，所以这条**必须**用装好的 wrangler，不能用 `npx` 那个缺二进制的版本。
+只是想确认接口好不好使，也可以直接用方案 A 部署完再 `curl` 线上地址。）
 
 ## 免费额度（D1，写这份文档时查到的官方数值）
 
