@@ -1,3 +1,5 @@
+import { ASSET_DIR_LIST } from "@/lib/assets";
+
 /**
  * 站点级常量。
  *
@@ -54,11 +56,13 @@ export function withBasePath(pathname: string): string {
  *
  * | 输入的写法 | 规整成 |
  * | --- | --- |
- * | `/uploads/x.jpg` | `/uploads/x.jpg`（带 basePath） |
- * | `public/uploads/x.jpg` | 同上 —— `public/` 就是站点的根目录 |
- * | `./public\uploads\x.jpg` | 同上（`./` 与反斜杠都会先被清理） |
- * | `uploads/x.jpg` | 同上（上传目录的前导斜杠可以省） |
+ * | `/images/x.jpg` | `/images/x.jpg`（带 basePath） |
+ * | `public/images/x.jpg` | 同上 —— `public/` 就是站点的根目录 |
+ * | `./public\images\x.jpg` | 同上（`./` 与反斜杠都会先被清理） |
+ * | `images/x.jpg` | 同上（`images/` `wallpapers/` `music/` `lyrics/` `uploads/` 的前导斜杠都可以省） |
  * | `https://…` / `data:…` / 其它 | 原样返回 |
+ *
+ * 目录清单来自 `src/lib/assets.ts`（`ASSET_DIR_LIST`），新增资源目录只要改那一处。
  *
  * ⚠️ 文章正文的 `<img>`、列表页的缩略图、frontmatter 的封面图
  * **必须都走这一个函数**，否则子路径部署时会出现
@@ -83,8 +87,11 @@ export function resolveImageSrc(value: unknown): string | null {
 
   if (src.startsWith("/")) return withBasePath(src);
 
-  // 只省略了前导斜杠的上传路径
-  if (src.startsWith("uploads/")) return withBasePath(`/${src}`);
+  // 只省略了前导斜杠的资源路径（images/…、music/…、uploads/…）
+  // 目录列表在 src/lib/assets.ts 里，两处共用同一份，别在这里手写
+  if (ASSET_DIR_LIST.some((dir) => src.startsWith(`${dir.slice(1)}/`))) {
+    return withBasePath(`/${src}`);
+  }
 
   return src;
 }

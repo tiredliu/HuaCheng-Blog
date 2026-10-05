@@ -72,8 +72,8 @@ function stripCode(source: string): string {
  * 从 MDX 正文里提取插入的图片（构建期执行）。
  *
  * 支持的两种写法：
- * - Markdown：`![说明](/uploads/x.jpg)`
- * - 原生标签：`<img src="/uploads/x.jpg" />`
+ * - Markdown：`![说明](/images/x.jpg)`
+ * - 原生标签：`<img src="/images/x.jpg" />`
  *
  * 刻意**跳过 data URL 与相对路径**：前者会让卡片背上几百 KB 的 base64，
  * 后者在列表页（URL 层级不同）会解析到错误的位置。
@@ -84,9 +84,9 @@ export function extractImages(source: string, limit = CARD_IMAGE_LIMIT): string[
   const found: string[] = [];
 
   const patterns = [
-    // ![说明](/uploads/x.jpg "可选标题")
+    // ![说明](/images/x.jpg "可选标题")
     /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
-    // <img src="/uploads/x.jpg" …>
+    // <img src="/images/x.jpg" …>
     /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi,
   ];
 

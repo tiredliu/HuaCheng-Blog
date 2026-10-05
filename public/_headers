@@ -10,7 +10,22 @@
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable
 
-# 上传的图片/音频：文件名不变，缓存短一些，方便随时替换
+# 资源目录（见 src/lib/assets.ts）：文件名不变，缓存短一些，方便随时替换
+# ⚠️ 每类资源只允许命中一条含 Cache-Control 的规则，否则同名 Header 会被逗号拼接
+/images/*
+  Cache-Control: public, max-age=86400
+
+/wallpapers/*
+  Cache-Control: public, max-age=86400
+
+/music/*
+  Cache-Control: public, max-age=86400
+
+# 歌词是纯文本，且要能被 fetch 当文本读出来
+/lyrics/*
+  Cache-Control: public, max-age=86400
+  Content-Type: text/plain; charset=utf-8
+
 /uploads/*
   Cache-Control: public, max-age=86400
 

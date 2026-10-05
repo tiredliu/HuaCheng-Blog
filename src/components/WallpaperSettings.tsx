@@ -57,7 +57,7 @@ type Feedback = { kind: "error" | "ok"; text: string } | null;
  * 壁纸设置。
  *
  * 四种来源：内置预设（纯 CSS，零请求）、图片链接、
- * 直传仓库 `public/uploads/`（不需要后端，见 github-upload.ts）、
+ * 直传仓库 `public/wallpapers/`（不需要后端，见 github-upload.ts）、
  * 以及只存在本机浏览器的图片。
  */
 export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectionProps) {
@@ -134,7 +134,8 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
       ]);
 
       const fileName = buildUploadFileName(file.name);
-      const result = await uploadImageToRepo(config, compressed.blob, fileName);
+      // 壁纸走 public/wallpapers/，不再和文章配图混在 uploads 里
+      const result = await uploadImageToRepo(config, compressed.blob, fileName, "wallpapers");
 
       const entry: WallpaperUpload = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -368,7 +369,7 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
       </div>
 
       <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
-        「上传到仓库」会把图片提交到 <code>public/uploads/</code>，任何访客都能看到，
+        「上传到仓库」会把图片提交到 <code>public/wallpapers/</code>，任何访客都能看到，
         适合当站点壁纸；「只存本机」不会上传，只有你自己看得见。
       </p>
 
@@ -386,7 +387,7 @@ export function WallpaperSection({ settings, onChange, isDark }: WallpaperSectio
             onKeyDown={(event) => {
               if (event.key === "Enter") applyUrl();
             }}
-            placeholder="https://… 或 /uploads/bg.jpg"
+            placeholder="https://… 或 /wallpapers/bg.jpg"
             className={cn(
               "min-w-0 flex-1 rounded-lg border bg-white px-2.5 py-1.5 text-xs text-stone-700 placeholder:text-stone-400 focus:outline-none dark:bg-stone-800 dark:text-stone-200",
               activeUploadUrl

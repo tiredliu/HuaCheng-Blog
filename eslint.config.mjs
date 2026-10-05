@@ -14,8 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // TinaCMS 自动生成的产物，不参与代码规范检查
     "tina/__generated__/**",
+    // public/ 下是静态资源（含 TinaCMS 生成的后台与图片/音频/歌词），不是我们的代码
     "public/admin/**",
-    "public/uploads/**",
+    "public/**",
     // 独立部署的 Cloudflare Worker：不在 Next 的构建里，也不该走 Next 的规则
     "workers/**",
     /**
