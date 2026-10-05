@@ -24,10 +24,10 @@ function formatTime(seconds: number): string {
 /**
  * HTML5 音频播放器。
  *
- * 纯静态方案下没有后端，音频文件放在 `public/uploads/` 里直接引用即可。
+ * 纯静态方案下没有后端，音频文件放在 `public/music/` 里直接引用即可。
  *
  * ```mdx
- * <AudioPlayer src="/uploads/bgm.mp3" title="城南花已开" artist="三亩地" />
+ * <AudioPlayer src="/music/bgm.mp3" title="城南花已开" artist="三亩地" />
  * ```
  */
 export function AudioPlayer({
