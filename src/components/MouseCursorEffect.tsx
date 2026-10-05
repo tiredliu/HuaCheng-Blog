@@ -13,9 +13,10 @@ import { createPortal } from "react-dom";
  * 3. **点击 / 按键音效** —— Web Audio 现场合成的短促音，无音频文件。
  *
  * 性能关键：拖尾**不是**「每个印记各自裁剪 + 贴图」，而是
- * 「主画布先整幅画一遍代码纹理 → 再用一张软点遮罩 `destination-in` 抠出揭示区」。
- * 这样每帧只有 ~N 次小圆点贴图 + 3 次整幅合成，与印记数量近乎无关，
- * 连点也不会卡（见 `drawReveal`）。
+ * 「先把软点叠进一张半分辨率遮罩 → 再在**存活印记的并集包围盒**里，
+ * 贴一次代码纹理并用 `destination-in` 抠出揭示区」。
+ * 每帧成本只跟拖尾范围有关，**与屏幕大小、印记数量都近乎无关**
+ * —— HiDPI 大屏上也不会因为「点几下 / 划一下」就掉帧（见 `drawReveal`）。
  *
  * 设计取舍（对照项目「极简克制、国内快、不往前台塞动画、JS 体积受控」）：
  * - 默认开启，可在「外观设置 → 鼠标特效」一键关闭（这就是它唯一的开关）；
@@ -38,12 +39,13 @@ const EDGE_CYCLE = 2200; // ms，每条边「消失 → 重绘」一轮
 /* ---------------- 拖尾：拨开代码 ---------------- */
 const STAMP_R = 42; // 每个笔刷印记的半径
 const FEATHER_SIZE = STAMP_R * 2; // 软点直径
-const STAMP_SPACING = 12; // 相邻印记间距，保证连续
-const CODE_LIFE = 1000; // ms，露出的代码淡出时间
-const STAMP_MAX = 44; // 印记数量上限
+const STAMP_SPACING = 14; // 相邻印记间距，保证连续
+const CODE_LIFE = 900; // ms，露出的代码淡出时间
+const STAMP_MAX = 36; // 印记数量上限
 const RIPPLE_LIFE = 560; // ms，点击涟漪存活时间
 const KEY_THROTTLE = 28; // ms，按键音最小间隔
-const BURST_THROTTLE = 110; // ms，连点时限制「揭开一片」的频率，避免堆积
+const NOTE_THROTTLE = 80; // ms，连点时的钢琴音最小间隔（别把音频节点堆爆）
+const BURST_THROTTLE = 140; // ms，连点时限制「揭开一片」的频率，避免堆积
 const MASK_SCALE = 0.5; // 遮罩画布相对视口的分辨率（软边，半分辨率足够且更省）
 
 // 被「拨开」露出的代码内容（伪代码，仅作视觉纹理）
@@ -329,12 +331,21 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     const playKey = () => blip(1200, "sine", 0.05, 0.025);
 
+    let lastNoteAt = 0;
+
     /**
      * 点击音：随机一个钢琴琴键音。
      * 用「基频 + 若干泛音」做加性合成，高次泛音衰减更快，
      * 再加一个短促起音 + 指数衰减的包络 —— 听感接近被敲击的琴弦。
+     *
+     * 连点时用 NOTE_THROTTLE 限制频率，并在每条泛音结束后 disconnect() ——
+     * 否则拼命点会在音频图里堆起几十个振荡器，主线程 / 音频线程都要抖一下。
      */
     const playPiano = () => {
+      const nowMs = performance.now();
+      if (nowMs - lastNoteAt < NOTE_THROTTLE) return;
+      lastNoteAt = nowMs;
+
       const ac = ensureAudio();
       if (!ac) return;
       const t = ac.currentTime;
@@ -363,6 +374,15 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.1 / (1 + i * 0.7));
         osc.connect(gain);
         gain.connect(master);
+        osc.onended = () => {
+          osc.disconnect();
+          gain.disconnect();
+          // 最长的那条泛音（i === 0）结束后，总线与滤波器也断掉，整张子图就能被回收
+          if (i === 0) {
+            master.disconnect();
+            tone.disconnect();
+          }
+        };
         osc.start(t);
         osc.stop(t + 1.2);
       });
@@ -384,8 +404,9 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       const now = performance.now();
       if (now - lastBurstAt >= BURST_THROTTLE) {
         lastBurstAt = now;
-        for (let i = 0; i < 3; i += 1) {
-          const ang = (i / 3) * TAU;
+        // 2 个印记就够点亮点击处了；连点时别让印记数瞬间冲高（会拉高那一秒的每帧成本）
+        for (let i = 0; i < 2; i += 1) {
+          const ang = (i / 2) * TAU;
           stamps.push({
             x: e.clientX + Math.cos(ang) * 11,
             y: e.clientY + Math.sin(ang) * 11,
@@ -480,18 +501,27 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     /**
      * 拖尾：两趟合成。
      * ① 把软点按印记画进遮罩（半分辨率，随便叠，很便宜）；
-     * ② 主画布先整幅画一遍代码纹理，再用 `destination-in` 按遮罩抠出揭示区。
-     * 这样每帧成本与印记数量近乎无关，连点也不会掉帧。
+     * ② 只在**存活印记的并集包围盒**内：贴代码子图 → 用 `destination-in` 按遮罩抠出揭示区。
+     *
+     * ⚠️ 关键是第 ② 步的「固定包围盒」：早先是整幅 `drawImage(codeTexture)` + 整幅遮罩，
+     * 在 HiDPI / 大屏上每帧要合成几千万像素（2560×1440@2x ≈ 15M 像素 ×2 次），
+     * 一旦有印记存活就掉帧 —— 表现就是「点几下之后移动鼠标，光标短暂卡在原地」。
+     * 现在成本只跟拖尾范围有关，跟屏幕大小无关。
      */
     const drawReveal = (now: number) => {
       if (!codeTexture || !mctx) return;
 
-      // ① 收集仍存活的印记，顺手淘汰过期的
+      // ① 收集仍存活的印记，顺手淘汰过期的，并求出并集包围盒
       mctx.setTransform(1, 0, 0, 1, 0, 0);
       mctx.clearRect(0, 0, mask.width, mask.height);
       mctx.setTransform(MASK_SCALE, 0, 0, MASK_SCALE, 0, 0);
 
       let alive = 0;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+
       for (let i = stamps.length - 1; i >= 0; i -= 1) {
         const p = stamps[i];
         const since = Math.max(0, now - p.t);
@@ -502,18 +532,47 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         }
         const alpha = (1 - age) * Math.min(1, since / 70);
         if (alpha <= 0.01) continue;
+
         mctx.globalAlpha = alpha;
         mctx.drawImage(dot, p.x - STAMP_R, p.y - STAMP_R, FEATHER_SIZE, FEATHER_SIZE);
         alive += 1;
+
+        if (p.x - STAMP_R < minX) minX = p.x - STAMP_R;
+        if (p.y - STAMP_R < minY) minY = p.y - STAMP_R;
+        if (p.x + STAMP_R > maxX) maxX = p.x + STAMP_R;
+        if (p.y + STAMP_R > maxY) maxY = p.y + STAMP_R;
       }
       mctx.globalAlpha = 1;
       if (alive === 0) return;
 
-      // ② 代码纹理全幅铺上，再按遮罩保留揭示区
-      ctx.drawImage(codeTexture, 0, 0, codeTexture.width, codeTexture.height, 0, 0, vw, vh);
+      // 裁剪到视口内，左右各留 1px 余量防止边缘缺一列
+      const bx = Math.max(0, Math.floor(minX) - 1);
+      const by = Math.max(0, Math.floor(minY) - 1);
+      const bw = Math.min(vw - bx, Math.ceil(maxX - minX) + 2);
+      const bh = Math.min(vh - by, Math.ceil(maxY - minY) + 2);
+      if (bw <= 0 || bh <= 0) return;
+
+      // ② 只在这个包围盒里做合成
+      const sx = Math.max(0, Math.floor(bx * dpr));
+      const sy = Math.max(0, Math.floor(by * dpr));
+      const sw = Math.min(codeTexture.width - sx, Math.ceil(bw * dpr));
+      const sh = Math.min(codeTexture.height - sy, Math.ceil(bh * dpr));
+      const mx = Math.max(0, Math.floor(bx * MASK_SCALE));
+      const my = Math.max(0, Math.floor(by * MASK_SCALE));
+      const mw = Math.min(mask.width - mx, Math.ceil(bw * MASK_SCALE));
+      const mh = Math.min(mask.height - my, Math.ceil(bh * MASK_SCALE));
+      if (sw <= 0 || sh <= 0 || mw <= 0 || mh <= 0) return;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx, by, bw, bh);
+      ctx.clip();
+      // 代码纹理：主画布已按 dpr 缩放，所以目标用 CSS 像素
+      ctx.drawImage(codeTexture, sx, sy, sw, sh, sx / dpr, sy / dpr, sw / dpr, sh / dpr);
       ctx.globalCompositeOperation = "destination-in";
-      ctx.drawImage(mask, 0, 0, mask.width, mask.height, 0, 0, vw, vh);
+      ctx.drawImage(mask, mx, my, mw, mh, mx / MASK_SCALE, my / MASK_SCALE, mw / MASK_SCALE, mh / MASK_SCALE);
       ctx.globalCompositeOperation = "source-over";
+      ctx.restore();
     };
 
     const draw = () => {
