@@ -20,6 +20,7 @@
 - [它是什么](#它是什么) · [快速开始](#快速开始) · [目录结构](#目录结构)
 - [写一篇新文章](#写一篇新文章) ← 含**代码高亮**、**数学公式**与**缩略框配图**
 - [**本地写作**](#本地写作长文推荐) ← 双栏预览、`npm run new`、面向写作的编辑器配置
+- [静态资源放在哪](#静态资源放在哪) ← 图片 / 壁纸 / 音频 / 歌词各放哪个目录
 - [界面说明](#界面说明) · [音乐播放器](#音乐播放器) · [站内搜索](#站内搜索)
 - [壁纸](#壁纸) · [**设置存在哪**](#设置存在哪)
 - [**互动：浏览量 · 点赞 · 评论区**](#互动浏览量--点赞--评论区) ← 含**统计后端怎么部署**
@@ -152,11 +153,36 @@ hua-cheng-blog/
 │   ├── comments.json               ★ 站长发布的公开评论与回复（所有人可见）
 │   └── site-settings.json          ★ 站点默认设置（可提交到仓库）
 ├── workers/blog-api/               ★ 可选的 Cloudflare Worker：浏览量/点赞/评论后端
-├── public/uploads/                 上传的图片与音频
+├── public/
+│   ├── images/                     文章配图与封面
+│   ├── wallpapers/                 站点壁纸
+│   ├── music/                      音频
+│   ├── lyrics/                     歌词（.lrc）
+│   └── uploads/                    TinaCMS 媒体库与直传落点
 ├── scripts/tina.mjs                TinaCMS 启动器（把编译临时目录放进项目内）
 ├── tina/config.ts                  内容模型定义
 └── next.config.ts                  静态导出 + MDX 插件
 ```
+
+---
+
+## 静态资源放在哪
+
+以前图片、壁纸、音频全堆在一个 `public/uploads/` 里，现在**按类型分目录**：
+
+| 目录 | 放什么 | 怎么引用 |
+| --- | --- | --- |
+| `public/images/` | 文章正文配图、封面图 | `![说明](/images/x.jpg)`、`cover: /images/x.jpg` |
+| `public/wallpapers/` | 站点壁纸大图 | 设置 → 壁纸 → 上传，或填 `/wallpapers/x.jpg` |
+| `public/music/` | 音频（mp3 / wav / flac …） | `musicUrl("x.mp3")`、`<AudioPlayer src="/music/x.mp3" />` |
+| `public/lyrics/` | 歌词（`.lrc`） | 在 `src/lib/music.ts` 里给曲目填 `lyrics` |
+| `public/uploads/` | TinaCMS 媒体库与「上传到仓库」的**兜底落点** | `/uploads/x.jpg` |
+
+约定统一写在 [src/lib/assets.ts](src/lib/assets.ts) 里（`ASSET_DIRS`），
+加新目录只改那一处，再同步 `public/_headers` 与 `nginx.conf` 的缓存规则。
+
+> `public/uploads/` **不要删**：TinaCMS 的 `media.mediaRoot` 和直传逻辑都指向它，
+> 它现在只是「没指明类型时的兜底」。TinaCMS 后台插入的图片会落到 `public/images/`。
 
 ---
 
@@ -213,21 +239,21 @@ draft: false
 ---
 title: 文章标题
 date: 2025-06-18
-cover: /uploads/20260618-cover.jpg   # ← 卡片背景图 + 文章页顶部大图
+cover: /images/20260618-cover.jpg   # ← 卡片背景图 + 文章页顶部大图
 ---
 
-![正文里的第一张图](/uploads/a.jpg)
-![第二张](/uploads/b.jpg)
+![正文里的第一张图](/images/a.jpg)
+![第二张](/images/b.jpg)
 
-<img src="/uploads/c.jpg" alt="原生标签写法也认" />
+<img src="/images/c.jpg" alt="原生标签写法也认" />
 ```
 
 细节：
 
 - `cover` 也可以填外链（`https://…`），不限于仓库里的图
 - 后台写作时用 **TinaCMS 后台 →「封面图（列表页缩略框的背景）」** 从媒体库选图，
-  它会把文件提交到 `public/uploads/` 并自动写好 frontmatter
-- 正文里的图片两种写法都认：Markdown 的 `![说明](/uploads/x.jpg)` 和原生 `<img src="…">`
+  它会把文件提交到 `public/images/` 并自动写好 frontmatter
+- 正文里的图片两种写法都认：Markdown 的 `![说明](/images/x.jpg)` 和原生 `<img src="…">`
 - **代码块与行内代码里的图片会被跳过** —— 贴一段示例代码不该让卡片多出几张缩略图
 - `data:` 开头的内联图片和相对路径会被忽略：前者会让卡片背上几百 KB 的 base64，
   后者在列表页（URL 层级和文章页不同）会解析到错误的位置
@@ -284,7 +310,7 @@ $$
 | 写法 | 作用 |
 | --- | --- |
 | `<BilibiliVideo bvid="BV1xx411c7mD" title="说明" />` | B 站视频，`loading="lazy"` |
-| `<AudioPlayer src="/uploads/bgm.mp3" title="曲名" artist="作者" />` | HTML5 音频播放器 |
+| `<AudioPlayer src="/music/bgm.mp3" title="曲名" artist="作者" />` | HTML5 音频播放器 |
 | `<Callout type="tip" title="小技巧">…</Callout>` | 提示框（`info` / `tip` / `warning` / `danger`） |
 
 它们都在 `src/mdx-components.tsx` 里全局注册，**不需要 import**。
@@ -428,16 +454,16 @@ npm run new -- "文章标题" my-slug
 
 ### 插图片
 
-**把图片文件丢进 `public/uploads/`，然后在文章里写 `![](/uploads/文件名.jpg)`。**
+**把图片文件丢进 `public/images/`，然后在文章里写 `![](/images/文件名.jpg)`。**
 
 路径怎么写都能认 —— 下面几种等价，怎么方便怎么来（`resolveImageSrc()` 会统一规整）：
 
 | 写法 | 结果 |
 | --- | :---: |
-| `/uploads/x.jpg` | ✅ |
-| `public/uploads/x.jpg` | ✅ |
-| `uploads/x.jpg` | ✅ |
-| `public\uploads\x.jpg`（Windows 反斜杠） | ✅ |
+| `/images/x.jpg` | ✅ |
+| `public/images/x.jpg` | ✅ |
+| `images/x.jpg` | ✅ |
+| `public\images\x.jpg`（Windows 反斜杠） | ✅ |
 
 > **上传前先压一下。** 这个项目**不做图片优化**（静态导出下 `next/image` 的优化器
 > 不可用，见[为什么不做图片优化](#为什么不做图片优化)），原图多大就下发多大。
@@ -541,27 +567,113 @@ git push
 | ⟳ / ⟲¹ / ⤨ | 循环切换播放模式：**列表循环 → 单曲循环 → 随机播放** |
 | ⏮ / ▶ / ⏭ | 上一首 / 播放暂停 / 下一首（随机模式下「下一首」是随机挑一首） |
 | ☰ | 展开 / 收起**播放列表**，点列表里的任意一首直接播 |
+| 🎤 | 打开 / 关闭**悬浮歌词窗** |
+| 🎛️ | **音效**（原声 / 低音增强 / 人声增强 / 清亮 / 大厅混响） |
 | 🔊 | 静音开关 |
 | 滑杆 | 音量（0–100，实时显示百分比） |
 
-播放模式和音量都会记在浏览器里（`hc-blog:music-mode` / `hc-blog:music-volume`），刷新后保留。
+播放模式、音量、歌词窗开关、音效都会记在浏览器里
+（`hc-blog:music-mode` / `hc-blog:music-volume` / `hc-blog:music-lyrics-open` / `hc-blog:music-effect`），
+刷新后保留。
+
+### 歌词窗
+
+点 🎤 会浮出一个歌词窗：
+
+- **拖动标题栏**移动，**拖右下角**调整大小（位置和大小都记在浏览器里）
+- **自动滚动**：整段歌词连续平移，当前这句始终停在窗口中间（不是跳行）
+- **点某一句可以跳到那个时间点**
+- 换歌会自动重新加载歌词；标题栏第二个按钮恢复默认位置
+
+底栏可以调外观，全都记在浏览器里：
+
+| 控件 | 作用 |
+| --- | --- |
+| `A−` / `A+` | 歌词字号（10–24px） |
+| 🎨 | 配色面板：**跟随主题 / 浅色 / 深色 / 自定义** |
+| 自定义时 | 正文、当前句、背景板各一个取色器 + 背景不透明度滑杆（**拉到 0 就是完全透明**，只剩文字浮在壁纸上） |
+
+配色面板里还有一个开关：**鼠标移开后整块隐藏**，移回来立刻显示（默认开）。
+打开窗口时会先亮 2 秒再决定要不要淡出 —— 否则鼠标还在播放器上时窗口一打开就是透明的。
+
+> 隐藏用的是 `opacity: 0` 而**不是** `pointer-events: none`：
+> 后者会让鼠标再也唤不醒它。
+
+歌词是 `.lrc` 文件，放在 `public/lyrics/`，再在歌单里登记：
+
+```ts
+{
+  id: "my-song",
+  title: "曲名",
+  artist: "歌手",
+  src: withBasePath(musicUrl("我的歌.mp3")),
+  lyrics: withBasePath(lyricUrl("我的歌.lrc")),   // ← 加这一行
+}
+```
+
+**`lyrics` 留空是正常的** —— 歌词窗会显示「这首歌还没有歌词」，不会报错。
+歌单里只有示例曲目一填了歌词，其余刻意留空（真人歌曲的歌词有版权，需要的自己放）。
+格式说明见 [public/lyrics/README.md](public/lyrics/README.md)。
+
+### 音效
+
+🎛️ 里有 5 档，**全部用浏览器自带的 Web Audio API 实时处理，完全免费**：
+
+| 档位 | 效果 |
+| --- | --- |
+| 原声 | 不处理（默认，连音频处理链都不建） |
+| 低音增强 | 抬低频、压高频 |
+| 人声增强 | 抬中频，人声浮出来 |
+| 清亮 | 抬高频，适合钢琴与弦乐 |
+| 大厅混响 | 现场算出一段脉冲响应做混响，不用下载任何音频素材 |
+
+三条实现上的约束（写在 [src/lib/audio-effects.ts](src/lib/audio-effects.ts) 里）：
+
+1. 一个 `<audio>` 只能建一次音频源节点，所以按元素缓存整条链
+2. 建了链之后声音只走 AudioContext，所以每次切音效都要 `resume()`
+3. **外链音频没有 CORS 头，接上会直接没声音** —— 所以外链曲目那个按钮是禁用的
+
+默认是「原声」，不点开就**完全不碰音频管线**，原有播放行为没有任何变化。
 
 ### 换成自己的歌
 
-1. 把音频文件放进 `public/uploads/`
+1. 把音频文件放进 `public/music/`
 2. 在 [src/lib/music.ts](src/lib/music.ts) 的 `defaultPlaylist` 里登记一行
 
 ```ts
 export const defaultPlaylist: Track[] = [
-  { id: "my-song", title: "曲名", artist: "歌手", src: uploadUrl("我的歌.mp3") },
+  { id: "my-song", title: "曲名", artist: "歌手", src: withBasePath(musicUrl("我的歌.mp3")) },
 ];
 ```
 
-`uploadUrl()` 会自动做 URL 编码 —— 中文文件名和空格都能正常播放，别手写 `/uploads/xxx`。
+`musicUrl()` 会自动做 URL 编码 —— 中文文件名和空格都能正常播放，别手写 `/music/xxx`。
 
-> 仓库里现在有一首 mp3（`白鲨jaws-dive back in time.mp3`）和三段用脚本生成的
-> `demo-0*.wav` 占位音频。**这三段 demo 只是为了让你点开就能听到声音**，
-> 不需要就删掉文件并从 `defaultPlaylist` 里移除对应条目。
+> **文件名里的 `&` 不用怕**：播放器按 URL 编码取文件，
+> `街道办GDC&欧阳耀莹-春娇与志明.mp3` 这种名字能正常播。
+> 但如果文件名里出现了 `&amp;` 这种转义残留（某些下载工具会这样），要改回 `&`。
+
+### 加歌词：`npm run lyrics`
+
+```bash
+# 1. 按歌单生成一套待填模板（每个模板顶部写清了是哪首歌）
+npm run lyrics:init
+
+# 2. 把歌词粘进 lyrics-src/*.txt（注释行下面直接贴，一行一句）
+#    带时间轴的 LRC 整段贴进去也认
+
+# 3. 导入
+npm run lyrics
+```
+
+脚本会自己把文件转成 `public/lyrics/<id>.lrc`（补好 `[ti:]` / `[ar:]`），
+并在 `src/lib/music.ts` 对应条目里插好 `lyrics:` 那一行。
+**没填的模板会被跳过**，不会生成一堆空歌词文件，跑完会提示还剩几首待填。
+完整说明见 [public/lyrics/README.md](public/lyrics/README.md)。
+
+> ⚠️ **版权**：音乐和歌词都是受版权保护的作品，而这个博客是**公开仓库** ——
+> 把音频 / 歌词提交进去等于公开分发。只放你有权利放的内容
+> （自己写的、已授权的、公有领域的，或从正版渠道购买后自用的）。
+> 脚本不会替你去网站抓取歌词，歌词文本需要你自己提供。
 
 ---
 
@@ -622,9 +734,9 @@ out/search-index.json          ← 构建产物，6 篇约 22KB
 | 方式 | 说明 | 谁看得到 |
 | --- | --- | --- |
 | 内置预设 | 7 套纯 CSS 渐变/网格（水墨、蓝图、纸纹、木棉、岭南、珠江夜、暮色）+「无」 | 所有人 |
-| **上传到仓库** | 提交到 `public/uploads/`，之后出现在「我的上传」里随时选用 | **所有访客** |
+| **上传到仓库** | 提交到 `public/wallpapers/`，之后出现在「我的上传」里随时选用 | **所有访客** |
 | 只存本机 | 压缩后存进浏览器 `localStorage`，不上传任何服务器 | 只有你自己 |
-| 图片直链 | 粘贴 `https://…`、`/uploads/bg.jpg` 或 `data:image/…` | 所有人 |
+| 图片直链 | 粘贴 `https://…`、`/wallpapers/bg.jpg` 或 `data:image/…` | 所有人 |
 
 还有两个滑杆：
 
@@ -634,9 +746,9 @@ out/search-index.json          ← 构建产物，6 篇约 22KB
 > **提示**：有壁纸时，外壳、顶栏、左侧导航、留言区会自动变成毛玻璃
 > （半透明 + `backdrop-blur`），壁纸才能真正透出来。
 
-### 不用后端，怎么把图片传进 `public/uploads/`？
+### 不用后端，怎么把图片传进 `public/wallpapers/`？
 
-`public/uploads/` 是仓库里的目录，浏览器不能直接写服务器文件系统。
+`public/wallpapers/` 是仓库里的目录，浏览器不能直接写服务器文件系统。
 纯静态站要「上传」，只有两条真正可行的路：
 
 1. **TinaCMS 媒体库**（项目里已经装好了）
@@ -674,7 +786,7 @@ owner / repo / branch 会自动带出默认值（从 `src/lib/site.ts` 的 `SITE
 ### 上传后为什么要等 1–2 分钟
 
 「上传到仓库」会提交一次 commit，Cloudflare Pages 检测到更新后重新构建部署，
-这个过程大约 1–2 分钟。在这之前，站内的 `/uploads/xxx.jpg` 还是 404。
+这个过程大约 1–2 分钟。在这之前，站内的 `/wallpapers/xxx.jpg` 还是 404。
 
 为了不让用户对着空白发呆，上传成功后会自动记下一个**临时地址**
 （`raw.githubusercontent.com` 上的原始文件，提交完立即可用），
@@ -693,7 +805,7 @@ owner / repo / branch 会自动带出默认值（从 `src/lib/site.ts` 的 `SITE
 export const DEFAULT_WALLPAPER: WallpaperSettings = {
   source: "preset",
   presetId: "ink",   // ← 换成 "none" 就没有默认壁纸；也可填 "kapok" / "lingnan" …
-  url: "",           // 也可以填 "/uploads/你上传的图.jpg" 当成全站默认壁纸
+  url: "",           // 也可以填 "/wallpapers/你上传的图.jpg" 当成全站默认壁纸
   dataUrl: "",
   strength: 100,
   blur: 0,
@@ -811,7 +923,7 @@ push 之后 Cloudflare 重新构建，对所有访客生效。
 `content/site-settings.json`，同样需要 GitHub Token。按钮上方会提示
 「当前设置和站点默认值有哪些不同」。
 
-> 想用**上传到仓库的壁纸**当全站默认：把 `wallpaper.url` 填成 `/uploads/你的图.jpg`、
+> 想用**上传到仓库的壁纸**当全站默认：把 `wallpaper.url` 填成 `/wallpapers/你的图.jpg`、
 > `source` 改成 `"url"` 即可。
 
 **恢复**：设置抽屉底部的「恢复站点默认值」会清掉本机偏好，回到仓库里的那一套。
@@ -1216,7 +1328,7 @@ CF 托管的域名会自动配好证书；域名不在 CF 的话，先把 NS 转
 
 **缓存策略已经内置**：[public/_headers](public/_headers) 会被复制进 `out/`，
 Cloudflare Pages 会自动读取它（这个文件本身不会被当成静态资源下发）：
-`_next/static/*` 永久缓存、`/uploads/*` 缓存一天、`/rss.xml` 带正确的 MIME 并交给 ETag 校验，
+`_next/static/*` 永久缓存、`/images/*` `/wallpapers/*` `/music/*` `/lyrics/*` `/uploads/*` 缓存一天、`/rss.xml` 带正确的 MIME 并交给 ETag 校验，
 其余请求加上几条基础安全头。
 
 > 注意 Cloudflare 的规则语义：**一个请求匹配多条规则时，同名 Header 是用逗号拼接的**，
@@ -1459,7 +1571,7 @@ Windows 本地出现的概率较高，原因和绕法见下面的「疑难排查
 线上（Linux）一般不会遇到。
 
 **图片/音频不显示**
-`public/` 下新增的资源要重新构建才会进入 `out/`；`public/uploads/` 里的文件
+`public/` 下新增的资源要重新构建才会进入 `out/`；`public/images/` 等资源目录里的文件
 记得一起提交到仓库。
 
 **改了文章但线上没更新**
@@ -1526,12 +1638,12 @@ Giscus 需要 `content/site-settings.json` 里 `giscus` 配置完整
 
 **列表页卡片的缩略图 404，但点进文章图是好的**
 两者的地址由同一个 `resolveImageSrc()` 生成，理论上不会不一致。
-真出现的话先确认图片确实提交到了 `public/uploads/`（`git status` 看一眼），
+真出现的话先确认图片确实提交到了 `public/images/`（`git status` 看一眼），
 再确认子路径部署时 `NEXT_PUBLIC_BASE_PATH` 是构建时设的而不是运行时设的。
 
 **`cover` 填了但卡片上没变化**
 `cover` 要写在 frontmatter 里（不是正文里），值必须是站内绝对路径
-（`/uploads/x.jpg`）或 http(s) 外链；`data:` 内联图片会被忽略。
+（`/images/x.jpg`）或 http(s) 外链；`data:` 内联图片会被忽略。
 另外**有封面的卡片不会再显示正文缩略图带**，这是有意的。
 
 ---
@@ -1653,7 +1765,7 @@ MDX 正文里的图片走 `src/mdx-components.tsx` 里覆写的原生 `<img>`（
 <details>
 <summary>如果以后真的需要图片优化，有这三条路</summary>
 
-1. **构建期预处理**：写个脚本用 `sharp` 把 `public/uploads/` 里的图压成 WebP
+1. **构建期预处理**：写个脚本用 `sharp` 把 `public/images/` 里的图压成 WebP
    并生成多尺寸，缺点是构建变慢、要自己维护
 2. **外部图床 / CDN**：`images: { loader: "custom", loaderFile: "./image-loader.ts" }`
    指向 Cloudinary 之类的服务，缺点是多一个外部依赖

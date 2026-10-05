@@ -15,6 +15,7 @@
 | 是什么 | 个人博客，纯静态（构建期生成 HTML，运行期没有 Node） |
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
 | 内容在哪 | `content/posts/*.md(x)`（frontmatter + 正文），**这是唯一的内容真相来源**。`.md` 与 `.mdx` **等价**，都走 MDX 管线 |
+| 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
 | 公开留言/评论 | `content/guestbook.json` + `content/comments.json`（只有站长能写，构建期读取） |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
 | 可选后端 | `workers/blog-api/`（Cloudflare Worker + KV：浏览量/点赞/评论；**独立部署，不参与 next build**） |
@@ -41,7 +42,7 @@ npx tsc --noEmit && npx eslint . && npx next build
 
 ---
 
-## 二、必须知道的 12 条硬约束
+## 二、必须知道的 13 条硬约束
 
 违反这些会「构建成功但线上坏掉」，或者让 dev 直接 500。前 4 条最要命。
 第 12 条是唯一一条**违反了也不会报错**的 —— 它只会让内容悄悄变样。
@@ -187,6 +188,9 @@ frontmatter 的 `cover`。任何一处自己拼 `basePath`，子路径部署
 （GitHub Pages 项目页）时就会出现「正文的图好好的、列表页缩略图 404」
 这种**只在子路径构建才暴露**的不一致。
 
+「省略了前导斜杠」的目录清单在 `src/lib/assets.ts` 的 `ASSET_DIR_LIST` 里，
+和 `resolveImageSrc()` **共用同一份** —— 加资源目录只改那一处。
+
 另外，卡片上「有 cover 就不显示正文缩略图带」是**有意的**，别顺手改成两个都显示
 （两种图片语言堆在同一张卡片里很难看）。
 
@@ -224,6 +228,20 @@ Turbopack 为每个模板字面量生成一个「上下文」，而**上下文�
 仓库里没有 `.md` 文章时，`.md` 那个分支会让整个构建报
 `Can't resolve '@/content/posts/' <dynamic> '.md'`。
 那种写法等于给仓库加了一条隐式约束「必须至少留一篇 .md」，而且报错看不出因果。
+
+### 13. 音频音效链：只建一次、只在用户操作里建、只给同源音频
+
+`src/lib/audio-effects.ts` 有三条不能违反的约束，违反了都是**声音没了**而不是报错：
+
+| 约束 | 违反的后果 |
+| --- | --- |
+| 一个 `<audio>` 只能 `createMediaElementSource()` 一次 | 第二次直接抛 `InvalidStateError` |
+| AudioContext 必须在**用户手势之后**创建/恢复 | 在 effect 里建会是 `suspended`，**接上就静音** |
+| 音频必须同源或带 CORS 头 | 外链（网易云之类）接进链里会**直接没声音** |
+
+所以：`applyAudioEffect()` 只在「点音效按钮」和「`play()` 成功之后」调用；
+外链曲目由 `isEffectAvailable()` 挡掉（界面上按钮是禁用的）；
+默认档位是「原声」，**不建任何 AudioContext**，原有播放行为不受影响。
 
 ---
 
@@ -320,6 +338,11 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | 浏览量/点赞/评论的后端 | `workers/blog-api/`（独立部署，改完要单独 `wrangler deploy`） |
 | 设置抽屉 | `src/components/SettingsPanel.tsx` |
 | 壁纸逻辑 | `src/lib/wallpaper.ts` + `WallpaperLayer/Settings.tsx` |
+| **资源目录约定**（图片/壁纸/音乐/歌词） | `src/lib/assets.ts` 的 `ASSET_DIRS` |
+| 歌单 / 播放模式 | `src/lib/music.ts` |
+| 歌词解析（LRC） | `src/lib/lyrics.ts`（纯函数，可以直接用 Node 验） |
+| 悬浮歌词窗 | `src/components/LyricsPanel.tsx`（挂到 `document.body`） |
+| 音效（Web Audio） | `src/lib/audio-effects.ts` |
 | 搜索结果排序 / 打分 | `src/lib/search.ts` + `SearchDialog.tsx` |
 | 文章元信息（字数等） | `src/lib/posts.ts` 的 `PostMeta` |
 | MDX 里能用的组件 | `src/mdx-components.tsx` |
@@ -344,7 +367,10 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | `src/lib/tag-slug.ts` | 标签名 ⇄ URL slug（**纯函数，客户端安全**） | 中文标签要在这里登记 |
 | `src/lib/site-settings.ts` | 站点默认值的类型、校验、**防闪屏脚本生成** | 客户端安全 |
 | `src/lib/site-settings-file.ts` | 构建期读 JSON | 服务端专用 |
-| `src/lib/github-upload.ts` | 直连 GitHub API：传图、删图、读写设置文件 | 客户端专用 |
+| `src/lib/github-upload.ts` | 直连 GitHub API：传图、删图、读写设置文件（传图目录由 `AssetDir` 指定） | 客户端专用 |
+| `src/lib/assets.ts` | 资源目录约定：`ASSET_DIRS` / `assetUrl()` / `musicUrl()` / `lyricUrl()` | 零依赖，客户端安全 |
+| `src/lib/lyrics.ts` | LRC 解析与「当前唱到哪一句」（**纯函数，可直接用 Node 跑**） | 客户端安全 |
+| `src/lib/audio-effects.ts` | Web Audio 音效链：三段均衡 + 现场生成的混响 | 客户端专用，见硬约束 13 |
 | `src/hooks/usePersistentState.ts` | localStorage ⇄ React（`useSyncExternalStore`） | 见硬约束 5 |
 | `src/mdx-components.tsx` | MDX 全局组件映射 | Next 约定文件，签名不能改 |
 
@@ -444,7 +470,7 @@ ASCII 部分（`workers/blog-api` 这种）反而是好的，所以失败会一�
 里面是**序列化后的原始 props**。曾经这样验证「有封面时不该显示缩略图」：
 
 ```js
-html.includes("/uploads/zz-a.jpg")   // true —— 但页面上根本没显示它
+html.includes("/images/zz-a.jpg")   // true —— 但页面上根本没显示它
 ```
 
 因为那篇文章的 `post.images` 数组本身就包含 zz-a，props 被原样写进了 flight 数据。
@@ -515,6 +541,25 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
 新增任何「按后缀/类型分支」的动态 import 时，都要想一遍
 「这个分支匹配不到文件会怎样」—— 它不会静默跳过，而是让整个构建挂掉。
 
+### 12. `position: fixed` 的浮层，只要祖先有 `backdrop-blur` / `transform` 就会被「关进」那个祖先
+
+歌词窗（`LyricsPanel`）第一版是就地 `fixed` 渲染在侧栏里的，结果：
+
+- 有壁纸时侧栏带 `backdrop-blur-xl`，移动端抽屉带 `translate-x-*` ——
+  **这两个都会给 fixed 子元素创建包含块**，于是「贴着视口右下角」变成了
+  「贴着侧栏右下角」，还被侧栏的 `overflow-hidden` 裁掉一截。
+
+**做法**：用 `createPortal(…, document.body)` 挂出去。
+
+顺带两个同源的小坑：
+
+- 侧栏内容区是 `overflow-y-auto`（按 CSS 规范 `overflow-x` 会跟着变成 `auto`），
+  所以**就地展开的浮层菜单也会被裁**。播放列表、音效列表都做成**就地展开**而不是浮层，
+  正是因为这个 —— 别顺手改成 absolute 浮层。
+- 浮层的位置**用 `right` / `bottom` 存**而不是 `left` / `top`：
+  默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
+  也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
+
 ---
 
 ## 七、常见改动的标准做法
@@ -550,7 +595,7 @@ draft: false
 | --- | --- |
 | `<Callout type="tip" title="…">…</Callout>` | 提示框，type 可为 info/tip/warning/danger |
 | `<BilibiliVideo bvid="BV…" title="…" />` | B 站视频 |
-| `<AudioPlayer src="/uploads/x.mp3" title="…" />` | 单曲播放器 |
+| `<AudioPlayer src="/music/x.mp3" title="…" />` | 单曲播放器 |
 
 新增全局组件就在那个文件的 `components` 对象里加一行。
 
@@ -558,8 +603,8 @@ draft: false
 
 | 想要的效果 | 怎么写 |
 | --- | --- |
-| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /uploads/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
-| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/uploads/a.jpg)` 或 `<img src="/uploads/a.jpg" />` |
+| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /images/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
+| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/images/a.jpg)` 或 `<img src="/images/a.jpg" />` |
 
 `extractImages()` 会自动跳过代码块/行内代码里的图片、`data:` 内联图和相对路径，
 最多取 4 张。**有 `cover` 时不再显示缩略图带**（有意的，见硬约束 11）。
@@ -666,7 +711,9 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 视频 / 音乐 · **自定义壁纸（含直传仓库）** · **站点默认值存仓库** ·
 深浅色主题 · **头像** · **列表页封面图与正文缩略图** ·
 **浏览量 / 点赞**（本机 / 全站两档） · **评论区（三条通道）** ·
-**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）**
+**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）** ·
+**资源按类型分目录**（图片 / 壁纸 / 音乐 / 歌词） · **悬浮歌词窗（可拖动缩放）** ·
+**Web Audio 音效（免费，默认关闭）**
 
 ### 明确没做（以及原因）
 

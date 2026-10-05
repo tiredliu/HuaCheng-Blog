@@ -247,7 +247,11 @@ hua-cheng-blog/
 ├── public/
 │   ├── avatar.png / avatar-128.png   ★ 头像（大图 + 列表用小图）
 │   ├── og-cover.png                  ★ 社交平台分享卡片
-│   ├── uploads/                      上传的图片与音频（TinaCMS 与直传都写这里）
+│   ├── images/                       文章配图与封面
+│   ├── wallpapers/                   站点壁纸
+│   ├── music/                        音频
+│   ├── lyrics/                       歌词（.lrc）
+│   ├── uploads/                      TinaCMS 媒体库与直传落点（见 src/lib/assets.ts）
 │   ├── admin/                        TinaCMS 后台（构建产物，不入库）
 │   ├── _headers                      Cloudflare Pages 缓存策略
 │   └── .nojekyll                     GitHub Pages 用（别让 Jekyll 吃掉 _next）
@@ -292,7 +296,7 @@ hua-cheng-blog/
 这是两块代码之间唯一的耦合点，也是最容易出错的地方。
 
 `cover` 那个字段在后台的标签是「封面图（列表页缩略框的背景）」，
-选图后 TinaCMS 会把文件写进 `public/uploads/` 并在 frontmatter 里填好路径 ——
+选图后 TinaCMS 会把文件写进 `public/images/` 并在 frontmatter 里填好路径 ——
 **正文里插入的图片不需要在后台声明**，它们由 `extractImages()` 从 MDX 里读。
 
 TinaCMS 的 `router` 指向 `/posts/${filename}`，所以保存后会跳转到前台对应地址。
@@ -1100,7 +1104,7 @@ path.join(process.cwd(), SITE_SETTINGS_PATH)
 | 来源 | 实现 | 谁看得到 | 取舍 |
 | --- | --- | --- | --- |
 | 内置预设 | 7 套纯 CSS 渐变/网格 | 所有人 | 零网络请求、零解码成本 |
-| 直传仓库 | 浏览器 → GitHub Contents API → `public/uploads/` | **所有访客** | 需要一次 token 配置，部署延迟 1–2 分钟 |
+| 直传仓库 | 浏览器 → GitHub Contents API → `public/wallpapers/` | **所有访客** | 需要一次 token 配置，部署延迟 1–2 分钟 |
 | 只存本机 | Canvas 压缩成 data URL 存 localStorage | 只有自己 | 零配置，但换设备就没了 |
 | 图片直链 | 存 URL，交给浏览器加载 | 所有人 | 灵活，但受对方站点可用性影响 |
 
@@ -1120,8 +1124,8 @@ interface WallpaperSettings {
 
 interface WallpaperUpload {   // 「我的上传」列表里的一项
   id: string;
-  url: string;                // /uploads/xxx.jpg
-  path: string;               // public/uploads/xxx.jpg
+  url: string;                // /wallpapers/xxx.jpg
+  path: string;               // public/wallpapers/xxx.jpg
   name: string;
   size: number;
   createdAt: string;
@@ -1158,11 +1162,11 @@ interface WallpaperUpload {   // 「我的上传」列表里的一项
 
 不压缩的话，6MB 的原图走 base64 上传会变成 8MB 的请求体。
 
-### 13.5 不用后端怎么把文件写进 `public/uploads/`
+### 13.5 不用后端怎么把文件写进 `public/wallpapers/`
 
 这是整个项目里最反直觉的一处，值得单独说明。
 
-`public/uploads/` 是**仓库里的目录**，浏览器当然不能写服务器文件系统。
+`public/wallpapers/` 是**仓库里的目录**，浏览器当然不能写服务器文件系统。
 纯静态站要「上传」，实际上只有两条路：
 
 | 方案 | 机制 | 是否需要我维护服务端 |
@@ -1193,14 +1197,14 @@ access-control-allow-methods: GET, POST, PATCH, PUT, DELETE
   ↓ compressImageFile()     浏览器内 canvas 压缩到 ~200–600KB
   ↓ makeThumbnail()         另生成一张 ~20KB 缩略图给选择面板用
   ↓ blobToBase64()
-  ↓ PUT /repos/{owner}/{repo}/contents/public/uploads/{文件名}
+  ↓ PUT /repos/{owner}/{repo}/contents/public/wallpapers/{文件名}
       body: { message, content: base64, branch }
   ↓ 提交成功 → 记一条 WallpaperUpload
-      · url         = /uploads/{文件名}
+      · url         = /wallpapers/{文件名}
       · fallbackUrl = raw.githubusercontent.com/...      ← 立即可用
   ↓ 同时把当前壁纸切到这张图
 Cloudflare Pages 检测到 commit → 重新构建（1–2 分钟）
-  ↓ probeImageUrl(/uploads/xxx.jpg) 探测到可用
+  ↓ probeImageUrl(/wallpapers/xxx.jpg) 探测到可用
   ↓ 丢掉 fallbackUrl
 ```
 
@@ -1208,7 +1212,7 @@ Cloudflare Pages 检测到 commit → 重新构建（1–2 分钟）
 
 这是设计里最容易忽略、但用户感受最直接的一点：
 
-commit 提交成功后，站内的 `/uploads/xxx.jpg` **仍然是 404**，
+commit 提交成功后，站内的 `/wallpapers/xxx.jpg` **仍然是 404**，
 因为 Cloudflare Pages 还没重新构建完。如果不做处理，
 用户上传完点了「使用」，只会看到一片空白 —— 看起来就像坏了。
 
@@ -1305,7 +1309,7 @@ Tailwind v4 把配置搬进了 CSS：
 
 1. `format: "mdx"` + `path: "content/posts"` 必须和内容层一致
 2. `router` 指向 `/posts/${filename}`，保存后跳到前台
-3. `media.mediaRoot: "uploads"` + `publicFolder: "public"`
+3. `media.mediaRoot: "images"` + `publicFolder: "public"`（文章配图目录；壁纸走 `public/wallpapers/`）
 
 ### 14.4 环境变量
 
@@ -1622,7 +1626,7 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 - 列表页卡片的缩略图 → 走 `posts.ts` 的 `extractImages()`
 - frontmatter 的封面 → 走 `readPostFile()`
 
-三处都要把 `/uploads/x.jpg` 变成 `/<basePath>/uploads/x.jpg`。
+三处都要把 `/images/x.jpg` 变成 `/<basePath>/images/x.jpg`。
 如果各写各的，就会出现**「正文里的图好好的，列表页缩略图 404」**——
 而且只在子路径构建时才暴露，本地 `npm run dev` 永远看不出来。
 
@@ -1823,7 +1827,7 @@ dev 下不抛是有意的 —— 否则整个开发服务器都会跟着报错�
 | **标签页（冷缓存）** | 清空 `.next` 后 14 个标签 × 3 轮 | 42/42 全部 200（修复前：中文标签首访必然 500） |
 | **静态托管的路径解码行为** | 用「解码路径」和「按原始字节匹配」两个服务器分别跑 `out/` | 所有 ASCII slug 标签页都是 200 —— 中文 URL 方案做不到这一点 |
 | **slug 撞车检查** | 构造两个会算出同一 slug 的标签 | 构建期 `throw`，不是静默合并 |
-| **封面图 / 正文缩略图** | 仓库里留了两篇自检文章（`image-cover-demo` 带 `cover`、`image-thumbnails-demo` 不带）+ 6 张由 `scripts/make-demo-images.py` 生成的示例图；构建后按 `<article>` 切开、切掉 RSC 数据，逐张卡片检查 | 13/13 通过：封面卡片是背景图且渲染 0 张缩略图、右上角标出「文中 4 张图」；无封面卡片渲染 3 张 4:3 裁切的缩略图且没有背景图；文章页渲染 cover 大图 + 全部 5 张配图；6 张图都在 `out/uploads/`。**验收完这些 fixture 可以整组删掉** |
+| **封面图 / 正文缩略图** | 仓库里留了两篇自检文章（`image-cover-demo` 带 `cover`、`image-thumbnails-demo` 不带）+ 6 张由 `scripts/make-demo-images.py` 生成的示例图；构建后按 `<article>` 切开、切掉 RSC 数据，逐张卡片检查 | 13/13 通过：封面卡片是背景图且渲染 0 张缩略图、右上角标出「文中 4 张图」；无封面卡片渲染 3 张 4:3 裁切的缩略图且没有背景图；文章页渲染 cover 大图 + 全部 5 张配图；6 张图都在 `out/images/`。**验收完这些 fixture 可以整组删掉** |
 | **公开留言与站长回复** | 在产物 DOM 里找文案 | 3 条留言都在；带「站长」徽标；`花城<!-- --> 回复` 与回复正文都在 |
 | **文章页互动 UI** | 检查 `out/posts/hello-world/index.html` | 有评论区标题、评论输入框、「浏览与点赞统计加载中」占位、互动服务指引文案 |
 | **互动纯函数** | `node --experimental-strip-types` 直接 import `interactions.ts`（它零 import） | 8/8 通过：ASCII slug 原样、中文 slug 转可行十六进制且 ≤160、超长不越界、按 id 去重且仓库优先、时间正序、脏数据丢弃、本机上限裁剪、内容截断与昵称兜底 |

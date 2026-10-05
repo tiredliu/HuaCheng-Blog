@@ -30,8 +30,15 @@ export default defineConfig({
   // server: { allowedOrigins: ["https://your-site.pages.dev"] },
 
   media: {
+    /**
+     * 后台写作时插入的图片落到 `public/images/`（文章配图目录）。
+     *
+     * 壁纸走 `public/wallpapers/`（在设置面板里上传，见 github-upload.ts），
+     * 音频在 `public/music/`，歌词在 `public/lyrics/` ——
+     * 目录约定统一写在 `src/lib/assets.ts` 里。
+     */
     tina: {
-      mediaRoot: "uploads",
+      mediaRoot: "images",
       publicFolder: "public",
     },
   },
