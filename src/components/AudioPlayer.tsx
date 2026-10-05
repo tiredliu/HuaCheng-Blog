@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Music, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { useMediaSession } from "@/hooks/useMediaSession";
+import type { Track } from "@/lib/music";
 import { cn } from "@/lib/utils";
 
 export interface AudioPlayerProps {
@@ -62,21 +64,48 @@ export function AudioPlayer({
     };
   }, []);
 
-  const toggle = async () => {
+  const play = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      // 浏览器可能因「缺少用户手势」拒绝播放，保持暂停状态即可
+      setPlaying(false);
+    }
+  }, []);
+
+  const pause = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    setPlaying(false);
+  }, []);
+
+  const toggle = () => {
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
-      try {
-        await audio.play();
-        setPlaying(true);
-      } catch {
-        setPlaying(false);
-      }
+      void play();
     } else {
-      audio.pause();
-      setPlaying(false);
+      pause();
     }
   };
+
+  /** 通知栏同样显示这首歌的信息（没有上一首/下一首，就只注册播放暂停） */
+  const track = useMemo<Track>(
+    () => ({ id: src, title, artist, src, cover }),
+    [artist, cover, src, title],
+  );
+  useMediaSession({
+    track,
+    playing,
+    duration,
+    position: current,
+    onPlay: play,
+    onPause: pause,
+  });
 
   const seek = (value: number) => {
     const audio = audioRef.current;

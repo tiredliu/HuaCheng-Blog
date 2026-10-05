@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ArrowUpRight, MessageSquare, RotateCcw, X } from "lucide-react";
+import { CommentEmojiBar } from "@/components/CommentEmojiBar";
 import { CommentThreadView } from "@/components/CommentThreadView";
 import { GiscusComments } from "@/components/GiscusComments";
 import { useThemeState } from "@/components/ThemeContext";
@@ -171,6 +172,8 @@ export function MessagePanel({
                     term={GUESTBOOK_DISCUSSION_TERM}
                     hint="登录一次 GitHub 账号即可留言，全站通用；换账号在评论区内点退出登录。内容对所有访客公开。"
                   />
+                  {/* 侧栏窄，用不带边框的那版，横着滚 */}
+                  <CommentEmojiBar variant="plain" className="mt-1 px-2 pb-1" />
                 </div>
               </div>
 

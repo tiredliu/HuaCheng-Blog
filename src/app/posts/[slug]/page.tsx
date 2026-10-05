@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, CalendarDays, FileText } from "lucide-react";
 import { MdxContent } from "@/components/MdxContent";
 import { PostBackLink } from "@/components/PostBackLink";
 import { PostInteractions } from "@/components/PostInteractions";
+import { PostScrollButtons } from "@/components/PostScrollButtons";
 import { PostStatsBar } from "@/components/PostStatsBar";
 import { ReadingProgress } from "@/components/ReadingProgress";
 import { TableOfContents } from "@/components/TableOfContents";
@@ -90,6 +91,8 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   return (
     <>
       <ReadingProgress />
+      {/* 右下角的回到顶部 / 跳到底部 */}
+      <PostScrollButtons />
 
       <article className="animate-fade-up">
         {/* 返回：从标签页进来就回该标签的文章列表 */}
