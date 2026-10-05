@@ -75,7 +75,7 @@ export default async function TagPage({ params }: { params: Promise<{ slug: stri
       ) : (
         <div className="space-y-4">
           {posts.map((post, index) => (
-            <PostCard key={post.slug} post={post} featured={index === 0} />
+            <PostCard key={post.slug} post={post} featured={index === 0} fromHref={`/tags/${slug}`} />
           ))}
         </div>
       )}

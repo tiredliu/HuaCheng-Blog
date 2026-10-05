@@ -9,6 +9,11 @@ export interface PostCardProps {
   /** 首屏第一篇文章用更醒目的样式 */
   featured?: boolean;
   className?: string;
+  /**
+   * 当前列表页的路径。带上它之后，点进文章再点「返回」会回到**这个列表**
+   * （例如从某个标签页进来，就回到该标签的文章列表），而不是一律回「全部文章」。
+   */
+  fromHref?: string;
 }
 
 /**
@@ -24,8 +29,12 @@ export interface PostCardProps {
  * 封面存在时不再显示缩略图条：两种图片放在同一张卡片里会互相打架，
  * 想让某张正文图片当背景，把它填进 `cover` 就行（TinaCMS 后台的「封面图」字段）。
  */
-export function PostCard({ post, featured = false, className }: PostCardProps) {
+export function PostCard({ post, featured = false, className, fromHref }: PostCardProps) {
   const hasCover = Boolean(post.cover);
+  // 带上来源列表页，文章页的「返回」就能回到这里（见 PostBackLink）
+  const href = fromHref
+    ? `/posts/${post.slug}?from=${encodeURIComponent(fromHref)}`
+    : `/posts/${post.slug}`;
   // 封面已经承担了「视觉第一眼」的职责，缩略图条只在没有封面时出现
   const thumbs = hasCover ? [] : post.images.slice(0, featured ? 4 : 3);
 
@@ -56,7 +65,7 @@ export function PostCard({ post, featured = false, className }: PostCardProps) {
 
       <div className="relative">
         <Link
-          href={`/posts/${post.slug}`}
+          href={href}
           className={cn(
             "block px-5 pb-4",
             // 有封面时把文字压到图片下半部分，让图片本身露出来
