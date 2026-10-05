@@ -40,13 +40,16 @@ export function PostInteractions({ slug, repoComments, settings, giscus }: PostI
   const { isDark } = useThemeState();
 
   if (giscus) {
+    // id="comments" 给「留言板」里那个「跳到正文评论」按钮当锚点
     return (
-      <GiscusComments
-        config={giscus}
-        isDark={isDark}
-        heading="评论"
-        hint="评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，站长会在那里回复，也可以随时导出。"
-      />
+      <div id="comments">
+        <GiscusComments
+          config={giscus}
+          isDark={isDark}
+          heading="评论"
+          hint="评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，站长会在那里回复，也可以随时导出。"
+        />
+      </div>
     );
   }
 
@@ -89,7 +92,7 @@ function LocalComments({ slug, repoComments, settings }: Omit<PostInteractionsPr
   });
 
   return (
-    <section className="mt-12 border-t border-stone-200 pt-8 dark:border-stone-800">
+    <section id="comments" className="mt-12 border-t border-stone-200 pt-8 dark:border-stone-800">
       <h2 className="mb-4 flex flex-wrap items-center gap-2 text-sm font-semibold tracking-wide text-stone-500 uppercase dark:text-stone-400">
         <MessageSquare className="h-4 w-4 text-brand-500" />
         评论

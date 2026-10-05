@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { ArrowUpRight, MessageSquare, RotateCcw, X } from "lucide-react";
 import { CommentThreadView } from "@/components/CommentThreadView";
 import { GiscusComments } from "@/components/GiscusComments";
@@ -41,12 +42,15 @@ export interface MessagePanelProps {
 /**
  * 右侧「可隐藏留言板」。
  *
- * 两种形态：
+ * ⚠️ **giscus 一个页面只支持一个实例**：它的 `client.js` 会复用页面上第一个
+ * `.giscus` 容器（`document.querySelector`，跨实例不隔离），而 iframe 的高度消息
+ * 也不带发送方标识 —— 两个实例会互相顶替容器、互相抢高度。实测表现就是
+ * 「留言板里显示了某篇文章的评论」。
  *
- * - **配了 Giscus（本站默认）** → 面板内嵌一条绑定到固定 Discussion 的 Giscus，
- *   任何人用 GitHub 账号都能留言，内容对所有访客公开，站长在 Discussions 里回复。
- * - **没配 Giscus** → 沿用「本机留言 + 站长发布」的老逻辑（见 `useCommentThread`），
- *   保持这个模板开箱即用。
+ * 所以这里做了明确分工：
+ * - **文章页**：正文底部已经有一条 Giscus，留言板就不再内嵌 Giscus，
+ *   改为提示「本页评论在正文底部」并给一个跳转按钮；
+ * - **其他页面**：留言板内嵌全站留言板（绑定「留言板」这条 Discussion）。
  */
 export function MessagePanel({
   isOpen,
@@ -58,6 +62,7 @@ export function MessagePanel({
   giscus,
 }: MessagePanelProps) {
   const { isDark } = useThemeState();
+  const pathname = usePathname();
   const [localMessages, setLocalMessages] = usePersistentState<CommentItem[]>(
     MESSAGES_KEY,
     [],
@@ -81,6 +86,10 @@ export function MessagePanel({
     [thread.comments],
   );
 
+  // 文章页正文底部已有 Giscus，留言板让位（见组件顶部说明）
+  const isPostPage = pathname?.startsWith("/posts/") ?? false;
+  const showGuestbook = Boolean(giscus) && !isPostPage;
+
   useEffect(() => {
     if (!isOpen || giscus) return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -89,6 +98,16 @@ export function MessagePanel({
   const resetLocal = () => {
     setLocalMessages(() => []);
     setResetHint(true);
+  };
+
+  const scrollToComments = () => {
+    onClose();
+    // 等面板收起动画开始后再滚动，移动端才不会被面板挡住
+    window.setTimeout(() => {
+      document
+        .getElementById("comments")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
   };
 
   const panel = (
@@ -119,7 +138,9 @@ export function MessagePanel({
               <h2 className="text-sm font-semibold text-stone-900 dark:text-stone-100">留言板</h2>
               <p className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
                 {giscus
-                  ? "由 GitHub Discussions 提供"
+                  ? showGuestbook
+                    ? "由 GitHub Discussions 提供"
+                    : "本页评论在正文底部"
                   : `${thread.comments.length} 条 · ${likeCount} 个赞 · ${
                       thread.remoteReady ? "全站可见" : "公开留言由站长发布"
                     }`}
@@ -137,33 +158,54 @@ export function MessagePanel({
         </div>
 
         {giscus ? (
-          <>
-            <div ref={listRef} className="flex-1 overflow-y-auto px-3.5 py-4">
-              <div className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white/80 p-1 shadow-sm dark:border-stone-800 dark:bg-stone-950/40">
-                <GiscusComments
-                  config={giscus}
-                  isDark={isDark}
-                  embedded
-                  showHeading={false}
-                  mapping="specific"
-                  term={GUESTBOOK_DISCUSSION_TERM}
-                  hint="需要登录 GitHub 账号才能留言，内容对所有访客公开。"
-                />
+          showGuestbook ? (
+            <>
+              <div ref={listRef} className="flex-1 overflow-y-auto px-3.5 py-4">
+                <div className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white/80 p-1 shadow-sm dark:border-stone-800 dark:bg-stone-950/40">
+                  <GiscusComments
+                    config={giscus}
+                    isDark={isDark}
+                    embedded
+                    showHeading={false}
+                    mapping="specific"
+                    term={GUESTBOOK_DISCUSSION_TERM}
+                    hint="需要登录 GitHub 账号才能留言，内容对所有访客公开。"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="border-t border-stone-200 px-4 py-2.5 dark:border-stone-800">
-              <a
-                href={`https://github.com/${giscus.repo}/discussions`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-stone-400 underline-offset-2 transition-colors hover:text-brand-500 hover:underline"
+              <div className="border-t border-stone-200 px-4 py-2.5 dark:border-stone-800">
+                <a
+                  href={`https://github.com/${giscus.repo}/discussions`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-stone-400 underline-offset-2 transition-colors hover:text-brand-500 hover:underline"
+                >
+                  <ArrowUpRight className="h-3 w-3" />
+                  在 GitHub Discussions 里查看
+                </a>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500">
+                <MessageSquare className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-medium text-stone-600 dark:text-stone-300">
+                本页评论在正文底部
+              </p>
+              <p className="text-[11px] leading-relaxed text-stone-400">
+                每篇文章都有自己的 GitHub Discussions 评论区；全站留言板请在首页等其他页面打开。
+              </p>
+              <button
+                type="button"
+                onClick={scrollToComments}
+                className="mt-1 rounded-lg border border-stone-200 px-3 py-1.5 text-[11px] text-stone-500 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-stone-700 dark:text-stone-400 dark:hover:border-brand-800 dark:hover:text-brand-400"
               >
-                <ArrowUpRight className="h-3 w-3" />
-                在 GitHub Discussions 里查看
-              </a>
+                跳到正文评论 ↓
+              </button>
             </div>
-          </>
+          )
         ) : (
           <>
             <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4">
