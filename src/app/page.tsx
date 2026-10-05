@@ -25,7 +25,7 @@ export default function HomePage() {
           你好，我是{SITE.author}
         </h1>
         <p className="mt-4 max-w-2xl leading-relaxed text-stone-500 dark:text-stone-400">
-          在这里记录前端工程实践、静态站点架构与日常折腾。
+          在这里记录生活，分享一些学习中的代码和有趣的事。
           这是一个纯静态的 Next.js 博客，内容写在 MDX 里，
           后台用 TinaCMS 编辑，构建产物直接托管在全球 CDN 上。
         </p>
