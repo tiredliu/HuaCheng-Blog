@@ -93,6 +93,10 @@
  *    而产生选区，Edge 等随即弹出**原生的「选中迷你菜单」**；那是系统浮层，
  *    弹出期间页面收不到 pointermove，自定义光标就会「停在原地、再瞬移」。
  *    正文（.article）与表单仍然可选中：复制代码、选词编辑是刚需。
+ *
+ *    手写的正文页（关于 / 联系 / 首页等）没有用 .article 包裹，文字也是刚需，
+ *    所以整列内容区 #content 也放行进选区；user-select 可继承，后代默认可选中，
+ *    但仍尊重显式 select-none 的工具类（如代码块的语言标签）。
  */
 html[data-cursor-fx="on"] * {
   cursor: none !important;
@@ -102,6 +106,8 @@ html[data-cursor-fx="on"] * {
 
 html[data-cursor-fx="on"] .article,
 html[data-cursor-fx="on"] .article *,
+html[data-cursor-fx="on"] #content,
+html[data-cursor-fx="on"] #content *,
 html[data-cursor-fx="on"] input,
 html[data-cursor-fx="on"] textarea,
 html[data-cursor-fx="on"] select,
