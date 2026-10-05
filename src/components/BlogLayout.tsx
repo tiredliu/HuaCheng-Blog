@@ -5,6 +5,7 @@ import { ContentArea } from "./ContentArea";
 import { MessagePanel } from "./MessagePanel";
 import { SearchDialog } from "./SearchDialog";
 import { SettingsPanel } from "./SettingsPanel";
+import { MouseCursorEffect, CURSOR_DEFAULT_COLOR, CODE_DEFAULT_COLOR, isCursorColor, isCodeColor } from "./MouseCursorEffect";
 import { Sidebar } from "./Sidebar";
 import { ThemeProvider } from "./ThemeContext";
 import { TopBar, type Theme } from "./TopBar";
@@ -85,6 +86,23 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
     "hc-blog:sidebar-width",
     defaults.sidebarWidth,
     isNumber,
+  );
+
+  // 鼠标特效：AI 图标光标 + 拖尾拨开代码 + 点击/按键音效，默认开启、可关闭
+  const [cursorEffect, setCursorEffect] = usePersistentState(
+    "hc-blog:cursor-effect",
+    true,
+    isBoolean,
+  );
+  const [cursorColor, setCursorColor] = usePersistentState(
+    "hc-blog:cursor-color",
+    CURSOR_DEFAULT_COLOR,
+    isCursorColor,
+  );
+  const [codeColor, setCodeColor] = usePersistentState(
+    "hc-blog:code-color",
+    CODE_DEFAULT_COLOR,
+    isCodeColor,
   );
 
   // 移动端：两栏都是覆盖式抽屉，用一次性的临时状态，避免进站就弹出来
@@ -296,6 +314,8 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
         fallbackUrl={activeUpload?.fallbackUrl}
       />
 
+      <MouseCursorEffect enabled={cursorEffect} color={cursorColor} codeColor={codeColor} />
+
       <a
         href="#content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-100 focus:rounded-lg focus:bg-brand-500 focus:px-3 focus:py-2 focus:text-sm focus:text-white"
@@ -364,6 +384,12 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
         onContentWidthChange={setContentWidth}
         sidebarWidth={sidebarWidth}
         onSidebarWidthChange={setSidebarWidth}
+        cursorEffect={cursorEffect}
+        onCursorEffectChange={setCursorEffect}
+        cursorColor={cursorColor}
+        onCursorColorChange={setCursorColor}
+        codeColor={codeColor}
+        onCodeColorChange={setCodeColor}
         wallpaper={wallpaper}
         onWallpaperChange={setWallpaper}
         isDark={theme === "dark"}

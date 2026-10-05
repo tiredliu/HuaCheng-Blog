@@ -85,7 +85,12 @@
     outline-offset: 2px;
   }
 
-  /* 自定义滚动条 */
+  /* 鼠标特效开启时隐藏原生光标（由 AI 图标替代，见 MouseCursorEffect） */
+html[data-cursor-fx="on"] * {
+  cursor: none !important;
+}
+
+/* 自定义滚动条 */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;

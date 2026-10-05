@@ -1,5 +1,6 @@
 "use client";
 
+import { ASSET_DIRS, ASSET_REPO_DIRS, type AssetDir } from "@/lib/assets";
 import { blobToBase64 } from "@/lib/image-utils";
 import { SITE } from "@/lib/site";
 
@@ -28,11 +29,18 @@ export interface GithubConfig {
 
 export const GITHUB_CONFIG_KEY = "hc-blog:github";
 
-/** 上传目标目录（相对仓库根） */
-export const UPLOAD_DIR = "public/uploads";
+/**
+ * 默认的上传落点（相对仓库根）。
+ *
+ * 现在**按类型分目录**了（见 `src/lib/assets.ts`）：
+ * - 壁纸 → `public/wallpapers/`
+ * - 文章配图（TinaCMS 后台）→ `public/images/`
+ * - `public/uploads/` 只作为没指明类型时的兜底
+ */
+export const UPLOAD_DIR = ASSET_REPO_DIRS.uploads;
 
 /** 浏览器端可访问的目录（用于拼 URL） */
-export const UPLOAD_URL_DIR = "/uploads";
+export const UPLOAD_URL_DIR = ASSET_DIRS.uploads;
 
 export function isGithubConfig(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
@@ -122,7 +130,10 @@ async function describeError(response: Response): Promise<string> {
 }
 
 /**
- * 上传一张图片到 `public/uploads/`。
+ * 上传一张图片到仓库的某个资源目录。
+ *
+ * `dir` 决定落在哪个目录：壁纸传 `"wallpapers"`，文章配图传 `"images"`，
+ * 不传就落到 `public/uploads/`（兜底）。
  *
  * 用 base64 走 Contents API，单文件建议控制在 1MB 以内
  * （我们上传前已经压到 1920px / q0.82，通常 200–600KB）。
@@ -131,18 +142,19 @@ export async function uploadImageToRepo(
   config: GithubConfig,
   file: Blob,
   fileName: string,
+  dir: AssetDir = "uploads",
 ): Promise<UploadedFile> {
   if (!config.token) throw new Error("还没有配置 GitHub Token");
   if (!config.owner || !config.repo) throw new Error("还没有配置仓库 owner / repo");
 
-  const path = `${UPLOAD_DIR}/${fileName}`;
+  const path = `${ASSET_REPO_DIRS[dir]}/${fileName}`;
   const content = await blobToBase64(file);
 
   const response = await fetch(`${API}/repos/${config.owner}/${config.repo}/contents/${path}`, {
     method: "PUT",
     headers: { ...authHeaders(config.token), "Content-Type": "application/json" },
     body: JSON.stringify({
-      message: `chore(uploads): 添加图片 ${fileName}`,
+      message: `chore(${dir}): 添加图片 ${fileName}`,
       content,
       branch: config.branch || undefined,
     }),
@@ -156,7 +168,7 @@ export async function uploadImageToRepo(
 
   return {
     path,
-    url: `${UPLOAD_URL_DIR}/${encodeURIComponent(fileName)}`,
+    url: `${ASSET_DIRS[dir]}/${encodeURIComponent(fileName)}`,
     // 提交完成后原始文件立即可用，用它顶过 Cloudflare 重新构建的 1–2 分钟
     fallbackUrl: `https://raw.githubusercontent.com/${config.owner}/${config.repo}/${config.branch || "main"}/${path}`,
     fileName,

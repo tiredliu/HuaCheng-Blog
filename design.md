@@ -96,7 +96,7 @@
 ```text
 构建期（next build，跑在 Node 里）                 运行期（用户浏览器）
 ─────────────────────────────────────         ─────────────────────────
-读 content/posts/*.mdx                         接收 CDN 发来的静态 HTML
+读 content/posts/*.md(x)                       接收 CDN 发来的静态 HTML
   ↓ gray-matter 解析 frontmatter                  ↓
   ↓ 过滤 draft                                   下载 _next/static 下的 JS/CSS
   ↓ 计算阅读时长 / 目录 / 相关文章                  ↓
@@ -115,7 +115,7 @@
 
 ```text
                  ┌──────────────────────────────┐
-                 │  content/posts/*.mdx          │  ← 唯一的真相来源
+                 │  content/posts/*.md(x)        │  ← 唯一的真相来源
                  │  （frontmatter + 正文）        │
                  └───────────┬──────────────────┘
                              │
@@ -239,7 +239,7 @@ hua-cheng-blog/
 │   └── mdx-components.tsx            MDX 全局组件注册（Next 约定文件）
 │
 ├── content/
-│   ├── posts/*.mdx                   文章本体
+│   ├── posts/*.md(x)                 文章本体（.md 与 .mdx 等价）
 │   ├── guestbook.json                ★ 站长发布的公开留言
 │   ├── comments.json                 ★ 站长发布的公开评论与回复
 │   └── site-settings.json            ★ 站点默认设置（可提交、可在线改）
@@ -247,7 +247,11 @@ hua-cheng-blog/
 ├── public/
 │   ├── avatar.png / avatar-128.png   ★ 头像（大图 + 列表用小图）
 │   ├── og-cover.png                  ★ 社交平台分享卡片
-│   ├── uploads/                      上传的图片与音频（TinaCMS 与直传都写这里）
+│   ├── images/                       文章配图与封面
+│   ├── wallpapers/                   站点壁纸
+│   ├── music/                        音频
+│   ├── lyrics/                       歌词（.lrc）
+│   ├── uploads/                      TinaCMS 媒体库与直传落点（见 src/lib/assets.ts）
 │   ├── admin/                        TinaCMS 后台（构建产物，不入库）
 │   ├── _headers                      Cloudflare Pages 缓存策略
 │   └── .nojekyll                     GitHub Pages 用（别让 Jekyll 吃掉 _next）
@@ -268,7 +272,8 @@ hua-cheng-blog/
 
 ### 6.1 frontmatter 字段
 
-`content/posts/*.mdx` 的 YAML 头，由 `src/lib/posts.ts` 读取：
+`content/posts/*.md(x)` 的 YAML 头，由 `src/lib/posts.ts` 读取。
+**`.md` 与 `.mdx` 等价**（见 7.1）：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -291,7 +296,7 @@ hua-cheng-blog/
 这是两块代码之间唯一的耦合点，也是最容易出错的地方。
 
 `cover` 那个字段在后台的标签是「封面图（列表页缩略框的背景）」，
-选图后 TinaCMS 会把文件写进 `public/uploads/` 并在 frontmatter 里填好路径 ——
+选图后 TinaCMS 会把文件写进 `public/images/` 并在 frontmatter 里填好路径 ——
 **正文里插入的图片不需要在后台声明**，它们由 `extractImages()` 从 MDX 里读。
 
 TinaCMS 的 `router` 指向 `/posts/${filename}`，所以保存后会跳转到前台对应地址。
@@ -313,7 +318,7 @@ const includeDrafts = options.includeDrafts ?? process.env.NODE_ENV !== "product
 ### 7.1 编译链路
 
 ```text
-content/posts/hello-world.mdx
+content/posts/hello-world.md(x)      ← .md 和 .mdx 走同一条路
       │
       │  @next/mdx（Turbopack loader）
       ├── remark-frontmatter   去掉 YAML 头（否则会被当成正文渲染）
@@ -322,9 +327,41 @@ content/posts/hello-world.mdx
       ↓
 React 组件
       ↓  src/app/posts/[slug]/page.tsx
-      │  const { default: Post } = await import(`@/content/posts/${slug}.mdx`)
+      │  await import(`@/content/posts/${post.fileName}`)   ← fileName 含扩展名
       ↓
 <MdxContent><Post /></MdxContent>      套上 .article 排版
+```
+
+#### 让 `.md` 也能用，需要两处配置，缺一不可
+
+这两条都在 `next.config.ts`，而且**都是「不配会静默出事」的类型**：
+
+| 配置 | 不配会怎样 |
+| --- | --- |
+| `extension: /\.mdx?$/` | `@next/mdx` 默认只匹配 `.mdx`。`.md` 文件没有任何 loader 处理，Turbopack 直接报错：`Unknown module type`（**构建失败**，还好，是响的） |
+| `options.format: "mdx"` | ⚠️ **这条最阴。** MDX 的 `format` 默认是 `'detect'` —— 按扩展名猜：扩展名在 `mdExtensions`（`.md` / `.markdown` / `.txt`…）里就按**纯 Markdown** 编译。于是 `.md` 里的 JSX 被**静默丢掉**： |
+
+`format` 缺失时的实测结果（同一份内容，只换扩展名）：
+
+| 内容 | `.md`（format 未设） | `.mdx` | `.md`（设了 `format: 'mdx'`） |
+| --- | --- | --- | --- |
+| `{1 + 1}` | **原样输出 `{1 + 1}`** | `2` | `2` ✅ |
+| `<Callout title="x">内容</Callout>` | **标签消失，只剩「内容」** | 渲染成提示框 | 渲染成提示框 ✅ |
+
+「标签消失、内容还在」意味着**页面看起来没错，只是样式没了** ——
+作者很可能几个月都发现不了。所以这一行不是为了「支持 `.md`」才加的，
+而是为了让两种扩展名的行为**完全一致**：不一致本身就是 bug。
+
+配置依据来自 `@mdx-js/mdx` 的源码与类型：
+
+```js
+// @mdx-js/mdx/lib/util/resolve-file-and-options.js
+format: format === 'md' || format === 'mdx'
+  ? format
+  : file.extname && (rest.mdExtensions || md).includes(file.extname) ? 'md' : 'mdx'
+
+// @mdx-js/mdx/lib/compile.d.ts
+format?: "detect" | "md" | "mdx" | null | undefined;   // 默认 'detect'
 ```
 
 **注意**：Turbopack 下 remark/rehype 插件只能用**「字符串名 + 可序列化选项」**传递，
@@ -339,7 +376,7 @@ React 组件
 用的是 Shiki。核心决策是**在构建期就把颜色算好**：
 
 ```text
-content/posts/*.mdx
+content/posts/*.md(x)
       ↓ remark-mdx / mdast
       ↓ @shikijs/rehype        ← 在这里上色
    out/posts/xxx/index.html    ← 已经带颜色了
@@ -493,7 +530,7 @@ Markdown 链接输出 `/hua-cheng-blog/posts/foo`，而手写的原生 `<a>` 仍
 ### 8.2 索引怎么生成
 
 ```text
-content/posts/*.mdx
+content/posts/*.md(x)
    ↓ getAllPosts()            （草稿在这一步就被过滤掉）
    ↓ toPlainText()            去掉 Markdown/JSX 语法，保留代码块内容
    ↓ 每篇截断到 6000 字        防止索引无限膨胀
@@ -1067,7 +1104,7 @@ path.join(process.cwd(), SITE_SETTINGS_PATH)
 | 来源 | 实现 | 谁看得到 | 取舍 |
 | --- | --- | --- | --- |
 | 内置预设 | 7 套纯 CSS 渐变/网格 | 所有人 | 零网络请求、零解码成本 |
-| 直传仓库 | 浏览器 → GitHub Contents API → `public/uploads/` | **所有访客** | 需要一次 token 配置，部署延迟 1–2 分钟 |
+| 直传仓库 | 浏览器 → GitHub Contents API → `public/wallpapers/` | **所有访客** | 需要一次 token 配置，部署延迟 1–2 分钟 |
 | 只存本机 | Canvas 压缩成 data URL 存 localStorage | 只有自己 | 零配置，但换设备就没了 |
 | 图片直链 | 存 URL，交给浏览器加载 | 所有人 | 灵活，但受对方站点可用性影响 |
 
@@ -1087,8 +1124,8 @@ interface WallpaperSettings {
 
 interface WallpaperUpload {   // 「我的上传」列表里的一项
   id: string;
-  url: string;                // /uploads/xxx.jpg
-  path: string;               // public/uploads/xxx.jpg
+  url: string;                // /wallpapers/xxx.jpg
+  path: string;               // public/wallpapers/xxx.jpg
   name: string;
   size: number;
   createdAt: string;
@@ -1125,11 +1162,11 @@ interface WallpaperUpload {   // 「我的上传」列表里的一项
 
 不压缩的话，6MB 的原图走 base64 上传会变成 8MB 的请求体。
 
-### 13.5 不用后端怎么把文件写进 `public/uploads/`
+### 13.5 不用后端怎么把文件写进 `public/wallpapers/`
 
 这是整个项目里最反直觉的一处，值得单独说明。
 
-`public/uploads/` 是**仓库里的目录**，浏览器当然不能写服务器文件系统。
+`public/wallpapers/` 是**仓库里的目录**，浏览器当然不能写服务器文件系统。
 纯静态站要「上传」，实际上只有两条路：
 
 | 方案 | 机制 | 是否需要我维护服务端 |
@@ -1160,14 +1197,14 @@ access-control-allow-methods: GET, POST, PATCH, PUT, DELETE
   ↓ compressImageFile()     浏览器内 canvas 压缩到 ~200–600KB
   ↓ makeThumbnail()         另生成一张 ~20KB 缩略图给选择面板用
   ↓ blobToBase64()
-  ↓ PUT /repos/{owner}/{repo}/contents/public/uploads/{文件名}
+  ↓ PUT /repos/{owner}/{repo}/contents/public/wallpapers/{文件名}
       body: { message, content: base64, branch }
   ↓ 提交成功 → 记一条 WallpaperUpload
-      · url         = /uploads/{文件名}
+      · url         = /wallpapers/{文件名}
       · fallbackUrl = raw.githubusercontent.com/...      ← 立即可用
   ↓ 同时把当前壁纸切到这张图
 Cloudflare Pages 检测到 commit → 重新构建（1–2 分钟）
-  ↓ probeImageUrl(/uploads/xxx.jpg) 探测到可用
+  ↓ probeImageUrl(/wallpapers/xxx.jpg) 探测到可用
   ↓ 丢掉 fallbackUrl
 ```
 
@@ -1175,7 +1212,7 @@ Cloudflare Pages 检测到 commit → 重新构建（1–2 分钟）
 
 这是设计里最容易忽略、但用户感受最直接的一点：
 
-commit 提交成功后，站内的 `/uploads/xxx.jpg` **仍然是 404**，
+commit 提交成功后，站内的 `/wallpapers/xxx.jpg` **仍然是 404**，
 因为 Cloudflare Pages 还没重新构建完。如果不做处理，
 用户上传完点了「使用」，只会看到一片空白 —— 看起来就像坏了。
 
@@ -1225,9 +1262,18 @@ const nextConfig: NextConfig = {
 };
 
 export default createMDX({
+  // ⚠️ 这两行都是为了「.md 和 .mdx 等价」，删掉任何一行都会出事（见 7.1）
+  extension: /\.mdx?$/,      // 默认只匹配 .mdx；不加则 .md 无人处理 → 构建失败
   options: {
-    remarkPlugins: ["remark-frontmatter", "remark-gfm"],
-    rehypePlugins: ["rehype-slug"],
+    format: "mdx",           // 默认 'detect' 会按扩展名把 .md 当纯 Markdown → JSX 被静默丢掉
+    remarkPlugins: ["remark-frontmatter", "remark-gfm", "remark-math"],
+    rehypePlugins: [
+      "rehype-slug",
+      ["@shikijs/rehype", { themes: { light: "github-light", dark: "github-dark" },
+                            defaultColor: false, addLanguageClass: true,
+                            defaultLanguage: "text" }],
+      ["rehype-katex", { output: "html", throwOnError: false, strict: false }],
+    ],
   },
 })(nextConfig);
 ```
@@ -1235,6 +1281,10 @@ export default createMDX({
 **`trailingSlash: true` 的意义**：产物是 `posts/hello-world/index.html`，
 任何静态服务器（含 Cloudflare Pages、GitHub Pages、Nginx）都能直接按目录找到它，
 **不需要写任何 rewrite 规则**。
+
+**`pageExtensions` 里的 `md` / `mdx`** 是为了让 `app/` 目录下也能直接放 `.md` 页面；
+`content/posts/` 不在 `app/` 下，所以它不负责文章的扩展名匹配 —— 那个由上面的
+`extension` 管。两处容易搞混：**`pageExtensions` 管路由，`extension` 管 loader。**
 
 ### 14.2 `src/app/globals.css`
 
@@ -1259,7 +1309,7 @@ Tailwind v4 把配置搬进了 CSS：
 
 1. `format: "mdx"` + `path: "content/posts"` 必须和内容层一致
 2. `router` 指向 `/posts/${filename}`，保存后跳到前台
-3. `media.mediaRoot: "uploads"` + `publicFolder: "public"`
+3. `media.mediaRoot: "images"` + `publicFolder: "public"`（文章配图目录；壁纸走 `public/wallpapers/`）
 
 ### 14.4 环境变量
 
@@ -1267,7 +1317,7 @@ Tailwind v4 把配置搬进了 CSS：
 | --- | --- | --- |
 | `TINA_PUBLIC_IS_LOCAL` | 仅本地 | `true` 时用文件系统，不需要 TinaCloud 账号 |
 | `NEXT_PUBLIC_TINA_CLIENT_ID` | 线上 | TinaCloud 项目 ID |
-| `TINA_TOKEN` | 线上 | 读写 token，构建时用于内容索引 |
+| `TINA_TOKEN` | 线上 | **只读** token（Read Only）；写权限来自后台的登录会话，不走这个 token |
 | `GITHUB_BRANCH` | 可选 | 默认 `main` |
 | `NEXT_PUBLIC_BASE_PATH` | 可选 | 子路径部署（GitHub Pages 项目页） |
 
@@ -1576,7 +1626,7 @@ Pagefind 更专业：它有真正的 CJK 分词、词干提取，还有一份 WA
 - 列表页卡片的缩略图 → 走 `posts.ts` 的 `extractImages()`
 - frontmatter 的封面 → 走 `readPostFile()`
 
-三处都要把 `/uploads/x.jpg` 变成 `/<basePath>/uploads/x.jpg`。
+三处都要把 `/images/x.jpg` 变成 `/<basePath>/images/x.jpg`。
 如果各写各的，就会出现**「正文里的图好好的，列表页缩略图 404」**——
 而且只在子路径构建时才暴露，本地 `npm run dev` 永远看不出来。
 
@@ -1606,6 +1656,106 @@ AI_CONTEXT 里记着的那类「安静地不工作」的问题。
 能原样显示给站长。
 
 **教训**：读操作可以宽容，写操作必须解释。
+
+### 17.16 为什么文章要同时接受 `.md` 和 `.mdx`
+
+起因是「怎么让本地写作不像写代码」。换 Typora / Obsidian 时撞上两件事：
+
+| 事实 | 后果 |
+| --- | --- |
+| Typora 和 Obsidian **原生只认 `.md`** | `.mdx` 在 Obsidian 里连文件树都不显示 |
+| Typora 在部分平台**保存时会把 `.mdx` 改名成 `.md`** | 当时文章页的动态 import 写死了 `.mdx`，改名 → **整个构建失败** |
+
+两条都指向同一个结论：**让两种后缀等价**。代价很小（`posts.ts` 加一个
+`fileName` 字段，文章页按扩展名分两个 import 分支），收益是：
+
+- 写作工具可以按自己的脾气来（`.md` / 不改名都不影响）
+- 想用哪个编辑器都行，不用为了工具去迁就文件名
+
+#### 但第一版改法是错的，而且错得很隐蔽
+
+只加 `extension: /\.mdx?$/` 时构建能过、页面能出 —— 看起来完全成了。
+直到做了一次**对照实验**（同一份内容，一份 `.md` 一份 `.mdx`）才发现：
+
+```text
+.md  ：A 表达式：{1 + 1}                    ← 表达式没求值
+       B 单行组件：<!-- -->单行内容           ← <Callout> 标签整个消失
+
+.mdx ：A 表达式：2
+       B 单行组件：<div class="...Callout...">单行标题...单行内容</div>
+```
+
+**「标签消失、内容还在」是最坏的一类失败**：页面不报错、文字也没少，
+只是所有富文本组件变成普通段落。作者大概率几个月都不会发现。
+
+根因在 `@mdx-js/mdx`：`format` 默认是 `'detect'`，而它**按扩展名**猜 ——
+扩展名落在 `mdExtensions`（含 `.md`）里就按纯 Markdown 编译。
+所以必须显式写 `format: 'mdx'`。完整推导见 7.1。
+
+**如果当时没做对照实验，这个改动会以「看起来成功了」的样子进仓库。**
+
+#### 第二个坑：动态 import 的「上下文不能为空」
+
+修好 `format` 之后还有一处。文章页最初是按扩展名分两个分支：
+
+```ts
+post.fileName.endsWith(".md")
+  ? import(`@/content/posts/${slug}.md`)     // ← 这里
+  : import(`@/content/posts/${slug}.mdx`)
+```
+
+Turbopack 会为每个模板字面量生成一个「上下文模块」（把匹配到的一批文件一起打包），
+而**这个上下文不能为空**。仓库里一篇 `.md` 都没有时：
+
+```text
+Module not found: Can't resolve '@/content/posts/' <dynamic> '.md'
+```
+
+也就是说那种写法会凭空造出一条隐式硬约束：**仓库里必须至少留一篇 `.md` 文章**。
+把唯一那篇删掉、或者改名成 `.mdx`，构建就挂 —— 而报错信息完全看不出这层因果。
+
+改成一个插值就解决了：
+
+```ts
+const { default: Post } = await import(`@/content/posts/${post.fileName}`);
+```
+
+`fileName` 已经含扩展名（来自 `readdirSync`），glob 是 `content/posts/*`，
+只要还有任何一篇文章上下文就非空。**顺带还少了一层按扩展名分支的逻辑。**
+
+验证过：顶层 0 篇 `.md` 时构建正常，加一篇 `.md` 也正常。
+
+#### 为什么不去掉 `.mdx` 只留 `.md`
+
+也可以（两种后缀现在完全等价），但没必要：
+现有文章全是 `.mdx`，重命名会在 git 历史里制造一堆 rename 记录，
+而收益只是「文件夹里少一种后缀」。**让两种共存，规则更简单：
+怎么写都行，写错了也不会坏。**
+
+#### 顺带发现：Obsidian 的仓库位置是个陷阱
+
+Obsidian 会在「仓库」根目录建 `.obsidian/`。如果把它开在 `content/posts/Blog`，
+会同时踩两个坑：
+
+1. `.obsidian/` 出现在内容目录里（已加进 `.gitignore`）
+2. **子目录里的文章根本不会被扫描** —— `listPostFiles()` 用的是
+   `fs.readdirSync()`（非递归），只认 `content/posts/` 下一层的文件名。
+   在子文件夹里写的文章**一篇都不会出现在站点上，而且不报错**。
+
+正确的开法：**仓库根选 `content/posts` 本身**。这条写进 README 了。
+
+#### 顺带补的一道防线：非 ASCII 文件名让构建失败
+
+支持 `.md` 之后，用 Obsidian 的人会**必然**踩到中文文件名 ——
+它新建笔记的默认名就叫「未命名」，而在 Obsidian 里完全看不出异常。
+
+所以在 `readPostFile()` 里加了一条检查：slug 不是 ASCII 时，
+**构建期直接 `throw`**（信息里带文件名），dev 下只警告。
+和 `findTagSlugCollisions()` 抛错是同一个思路：
+**能提前停下来的错误，就不要留到线上变成「文章悄悄不出现」。**
+
+dev 下不抛是有意的 —— 否则整个开发服务器都会跟着报错，
+一个文件写错名就什么都看不了了。取舍写在 AI_CONTEXT 硬约束 9。
 </p>
 
 ---
@@ -1677,12 +1827,16 @@ AI_CONTEXT 里记着的那类「安静地不工作」的问题。
 | **标签页（冷缓存）** | 清空 `.next` 后 14 个标签 × 3 轮 | 42/42 全部 200（修复前：中文标签首访必然 500） |
 | **静态托管的路径解码行为** | 用「解码路径」和「按原始字节匹配」两个服务器分别跑 `out/` | 所有 ASCII slug 标签页都是 200 —— 中文 URL 方案做不到这一点 |
 | **slug 撞车检查** | 构造两个会算出同一 slug 的标签 | 构建期 `throw`，不是静默合并 |
-| **封面图 / 正文缩略图** | 仓库里留了两篇自检文章（`image-cover-demo` 带 `cover`、`image-thumbnails-demo` 不带）+ 6 张由 `scripts/make-demo-images.py` 生成的示例图；构建后按 `<article>` 切开、切掉 RSC 数据，逐张卡片检查 | 13/13 通过：封面卡片是背景图且渲染 0 张缩略图、右上角标出「文中 4 张图」；无封面卡片渲染 3 张 4:3 裁切的缩略图且没有背景图；文章页渲染 cover 大图 + 全部 5 张配图；6 张图都在 `out/uploads/`。**验收完这些 fixture 可以整组删掉** |
+| **封面图 / 正文缩略图** | 仓库里留了两篇自检文章（`image-cover-demo` 带 `cover`、`image-thumbnails-demo` 不带）+ 6 张由 `scripts/make-demo-images.py` 生成的示例图；构建后按 `<article>` 切开、切掉 RSC 数据，逐张卡片检查 | 13/13 通过：封面卡片是背景图且渲染 0 张缩略图、右上角标出「文中 4 张图」；无封面卡片渲染 3 张 4:3 裁切的缩略图且没有背景图；文章页渲染 cover 大图 + 全部 5 张配图；6 张图都在 `out/images/`。**验收完这些 fixture 可以整组删掉** |
 | **公开留言与站长回复** | 在产物 DOM 里找文案 | 3 条留言都在；带「站长」徽标；`花城<!-- --> 回复` 与回复正文都在 |
 | **文章页互动 UI** | 检查 `out/posts/hello-world/index.html` | 有评论区标题、评论输入框、「浏览与点赞统计加载中」占位、互动服务指引文案 |
 | **互动纯函数** | `node --experimental-strip-types` 直接 import `interactions.ts`（它零 import） | 8/8 通过：ASCII slug 原样、中文 slug 转可行十六进制且 ≤160、超长不越界、按 id 去重且仓库优先、时间正序、脏数据丢弃、本机上限裁剪、内容截断与昵称兜底 |
 | **互动文件读取器** | 临时改写 `content/guestbook.json` 后调 `readGuestbook()`，`finally` 还原 | 8/8 通过：正常 3 条、非法 JSON→空数组、带 BOM 可解析、类型不对→空数组、逐条清洗（空昵称/非法 likes/缺时间都有兜底）、**原文件按字节还原** |
 | Worker（互动服务） | 仓库外临时目录用假 KV + 打桩 GitHub 跑真实 Worker 代码 | 121 项断言全过：CORS 预检逐项、点赞去重/幂等、**非站长 replyTo/deleteId/owner 一律 403 且 KV 零写入**、GitHub 5xx/超时/限流一律 503、path 与长度边界、32KB 边界、第 501 条评论 400、KV 脏数据退回默认值不 500 |
+| **`.md` / `.mdx` 等价** | **对照实验**：同一份内容分别存成 `.md` 和 `.mdx`，里面放 `{1 + 1}`、单行 `<Callout>`、带空行的 `<Callout>`，构建后逐项对比两份 HTML | 设 `format: "mdx"` 之后 6 项全部一致（表达式求值、组件标题、组件内容都渲染）；**设之前 `.md` 侧三项失败**：表达式原样输出、Callout 标签消失只剩内容 —— 这就是差点漏掉的 bug |
+| `.md` 的 MDX 能力 | 另建一篇 `.md`，内含 Callout + 代码块 + 行内/行间公式，检查产物 | 13 项里 13 项通过（组件、Shiki 双主题变量、语言标签、KaTeX 行内与行间、列表收录、搜索索引收录、slug 不含扩展名） |
+| 图片路径容错 | `resolveImageSrc` 19 项断言 × 有/无 basePath 两种模式 | 全过。顺带修掉一个**原本就有**的 bug：协议相对地址 `//example.com/a.png` 在有 basePath 时被拼成 `/base//example.com/a.png` |
+| `npm run new` | 交互 / 非交互 / 纯中文标题三种调用 | 全部正常；非 TTY 环境下不会卡在提问上 |
 
 ### 三个修掉的 bug
 

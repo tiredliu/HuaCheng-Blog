@@ -19,6 +19,8 @@
 
 - [它是什么](#它是什么) · [快速开始](#快速开始) · [目录结构](#目录结构)
 - [写一篇新文章](#写一篇新文章) ← 含**代码高亮**、**数学公式**与**缩略框配图**
+- [**本地写作**](#本地写作长文推荐) ← 双栏预览、`npm run new`、面向写作的编辑器配置
+- [静态资源放在哪](#静态资源放在哪) ← 图片 / 壁纸 / 音频 / 歌词各放哪个目录
 - [界面说明](#界面说明) · [音乐播放器](#音乐播放器) · [站内搜索](#站内搜索)
 - [壁纸](#壁纸) · [**设置存在哪**](#设置存在哪)
 - [**互动：浏览量 · 点赞 · 评论区**](#互动浏览量--点赞--评论区) ← 含**统计后端怎么部署**
@@ -146,12 +148,17 @@ hua-cheng-blog/
 │   │   └── useCommentThread.ts     评论区/留言板的共同逻辑
 │   └── mdx-components.tsx          MDX 全局组件注册
 ├── content/
-│   ├── posts/*.mdx                 文章本体
+│   ├── posts/*.md(x)               文章本体（.md 与 .mdx 等价）
 │   ├── guestbook.json              ★ 站长发布的公开留言（所有人可见）
 │   ├── comments.json               ★ 站长发布的公开评论与回复（所有人可见）
 │   └── site-settings.json          ★ 站点默认设置（可提交到仓库）
 ├── workers/blog-api/               ★ 可选的 Cloudflare Worker：浏览量/点赞/评论后端
-├── public/uploads/                 上传的图片与音频
+├── public/
+│   ├── images/                     文章配图与封面
+│   ├── wallpapers/                 站点壁纸
+│   ├── music/                      音频
+│   ├── lyrics/                     歌词（.lrc）
+│   └── uploads/                    TinaCMS 媒体库与直传落点
 ├── scripts/tina.mjs                TinaCMS 启动器（把编译临时目录放进项目内）
 ├── tina/config.ts                  内容模型定义
 └── next.config.ts                  静态导出 + MDX 插件
@@ -159,7 +166,35 @@ hua-cheng-blog/
 
 ---
 
+## 静态资源放在哪
+
+以前图片、壁纸、音频全堆在一个 `public/uploads/` 里，现在**按类型分目录**：
+
+| 目录 | 放什么 | 怎么引用 |
+| --- | --- | --- |
+| `public/images/` | 文章正文配图、封面图 | `![说明](/images/x.jpg)`、`cover: /images/x.jpg` |
+| `public/wallpapers/` | 站点壁纸大图 | 设置 → 壁纸 → 上传，或填 `/wallpapers/x.jpg` |
+| `public/music/` | 音频（mp3 / wav / flac …） | `musicUrl("x.mp3")`、`<AudioPlayer src="/music/x.mp3" />` |
+| `public/lyrics/` | 歌词（`.lrc`） | 在 `src/lib/music.ts` 里给曲目填 `lyrics` |
+| `public/uploads/` | TinaCMS 媒体库与「上传到仓库」的**兜底落点** | `/uploads/x.jpg` |
+
+约定统一写在 [src/lib/assets.ts](src/lib/assets.ts) 里（`ASSET_DIRS`），
+加新目录只改那一处，再同步 `public/_headers` 与 `nginx.conf` 的缓存规则。
+
+> `public/uploads/` **不要删**：TinaCMS 的 `media.mediaRoot` 和直传逻辑都指向它，
+> 它现在只是「没指明类型时的兜底」。TinaCMS 后台插入的图片会落到 `public/images/`。
+
+---
+
 ## 写一篇新文章
+
+三种方式，按篇幅选：
+
+| 场景 | 用哪个 |
+| --- | --- |
+| 改错别字、换封面图、发一条短随笔 | [方式一：网页后台](#方式一网页后台) |
+| 已经想清楚要写什么，就是补一个文件 | [方式二：直接写文件](#方式二直接写文件) |
+| **写长文** | [本地写作](#本地写作长文推荐)——双栏预览 + `npm run new` |
 
 ### 方式一：网页后台
 
@@ -168,7 +203,7 @@ hua-cheng-blog/
 
 ### 方式二：直接写文件
 
-在 `content/posts/` 下新建 `my-post.mdx`：
+在 `content/posts/` 下新建 `my-post.md`（`.mdx` 也行，两种等价 —— 见[本地写作](#本地写作长文推荐)）：
 
 ```mdx
 ---
@@ -204,21 +239,21 @@ draft: false
 ---
 title: 文章标题
 date: 2025-06-18
-cover: /uploads/20260618-cover.jpg   # ← 卡片背景图 + 文章页顶部大图
+cover: /images/20260618-cover.jpg   # ← 卡片背景图 + 文章页顶部大图
 ---
 
-![正文里的第一张图](/uploads/a.jpg)
-![第二张](/uploads/b.jpg)
+![正文里的第一张图](/images/a.jpg)
+![第二张](/images/b.jpg)
 
-<img src="/uploads/c.jpg" alt="原生标签写法也认" />
+<img src="/images/c.jpg" alt="原生标签写法也认" />
 ```
 
 细节：
 
 - `cover` 也可以填外链（`https://…`），不限于仓库里的图
 - 后台写作时用 **TinaCMS 后台 →「封面图（列表页缩略框的背景）」** 从媒体库选图，
-  它会把文件提交到 `public/uploads/` 并自动写好 frontmatter
-- 正文里的图片两种写法都认：Markdown 的 `![说明](/uploads/x.jpg)` 和原生 `<img src="…">`
+  它会把文件提交到 `public/images/` 并自动写好 frontmatter
+- 正文里的图片两种写法都认：Markdown 的 `![说明](/images/x.jpg)` 和原生 `<img src="…">`
 - **代码块与行内代码里的图片会被跳过** —— 贴一段示例代码不该让卡片多出几张缩略图
 - `data:` 开头的内联图片和相对路径会被忽略：前者会让卡片背上几百 KB 的 base64，
   后者在列表页（URL 层级和文章页不同）会解析到错误的位置
@@ -275,7 +310,7 @@ $$
 | 写法 | 作用 |
 | --- | --- |
 | `<BilibiliVideo bvid="BV1xx411c7mD" title="说明" />` | B 站视频，`loading="lazy"` |
-| `<AudioPlayer src="/uploads/bgm.mp3" title="曲名" artist="作者" />` | HTML5 音频播放器 |
+| `<AudioPlayer src="/music/bgm.mp3" title="曲名" artist="作者" />` | HTML5 音频播放器 |
 | `<Callout type="tip" title="小技巧">…</Callout>` | 提示框（`info` / `tip` / `warning` / `danger`） |
 
 它们都在 `src/mdx-components.tsx` 里全局注册，**不需要 import**。
@@ -309,6 +344,169 @@ $$
 > | `<a href="/posts/foo">另一篇</a>` | ❌ |
 >
 > 手写的原生 `<a>` **不会**经过组件映射。子路径部署（GitHub Pages 项目页）时会 404。
+
+---
+
+## 本地写作（长文推荐）
+
+网页后台适合改错别字、换封面图、发一条短随笔。**但写长文，本地更舒服** ——
+`content/posts/` 下的文章就是普通的文本文件，用任何编辑器打开都行，
+而且能一边写一边看**真实渲染**的效果。
+
+### `.md` 和 `.mdx` 都能用（推荐 `.md`）
+
+| 扩展名 | 支持情况 |
+| --- | --- |
+| **`.md`** | ✅ **写作工具最认这个** —— Typora、Obsidian 都原生支持 |
+| `.mdx` | ✅ 一样能跑（仓库原来的文章都是这个） |
+
+**两者走的是同一条管线**，能力完全一致：`.md` 里照样能写 `<Callout>`、
+`<BilibiliVideo>`、Shiki 代码高亮和 KaTeX 公式。区别只在文件名。
+
+所以：**想用 Typora / Obsidian 写，就把新文章存成 `.md`。**
+`npm run new` 生成的是 `.mdx`；想用 `.md` 就自己把后缀改掉，或者建完直接改名（都不影响构建）。
+
+> 为什么两个都要支持：Typora 和 Obsidian 这类工具**原生只认 `.md`**；
+> 而且 Typora 在部分平台上保存时会把 `.mdx` 悄悄改名成 `.md` ——
+> 以前这会让整个构建失败，现在两种后缀都收，改名也不再有影响。
+
+### 双栏工作流
+
+```text
+┌────────────────────────┬────────────────────────┐
+│  VS Code / Typora      │  浏览器                  │
+│  写 content/posts/x.md  │  localhost:3000          │
+│  行号关掉、中文字体      │  npm run dev 的真实渲染   │
+└────────────────────────┴────────────────────────┘
+```
+
+```bash
+npm run dev          # 一直开着，改完自动刷新
+```
+
+Windows 上按 `Win` + `←/→` 可以把两个窗口各占半屏，然后就这么写。
+
+**为什么预览走浏览器而不是编辑器自带的预览**：VS Code 的 Markdown 预览
+（`Ctrl+K V`）不认 MDX 组件，Typora 也会把 `<Callout>` 当普通文本显示。
+而 `npm run dev` 渲染的是**和线上一模一样**的页面 —— 代码高亮、公式、卡片样式、目录全都在。
+
+### 新建文章：`npm run new`
+
+```bash
+npm run new
+# 文章标题：为什么我又换了个博客
+# 文件名（直接回车用 why-new-blog）：why-new-blog
+```
+
+它会：生成 `content/posts/<文件名>.mdx` → 写好 frontmatter（日期自动填今天）→ 用 VS Code 打开。
+
+也可以不带交互直接用：
+
+```bash
+npm run new -- "文章标题" my-slug
+```
+
+> 想让新文章是 `.md`（给 Typora / Obsidian 用），建完把后缀改掉即可 —— 两种后缀等价。
+
+> ⚠️ **文件名必须是 ASCII**（小写字母 + 数字 + 连字符），不能用中文。
+> 实测：`content/posts/中文文件名测试.mdx` 在本机访问
+> `/posts/中文文件名测试/` 会 500 / 404，而 ASCII 文件名一切正常 ——
+> 原因和上面「标签页用英文 slug」是同一个（Next 拿已编码的路径段去比较）。
+> `npm run new` 会把中文输入直接挡掉，退回 `post-2026-10-03` 这种兜底名。
+>
+> 三道防线，所以它不会悄悄溜到线上：
+>
+> | 环节 | 行为 |
+> | --- | --- |
+> | `npm run new` | 挡下中文输入，退回 `post-<日期>` |
+> | `npm run dev` | 终端里打一条警告（不打断其它页面） |
+> | **构建 / 部署** | ⛔ **直接失败并指名文件**：`文章文件名必须是 ASCII：content/posts/未命名.md` |
+>
+> 用 Obsidian 的话这条特别要紧：**它新建笔记的默认名就是「未命名」**，
+> 在 Obsidian 里完全看不出异常 —— 建完记得立刻改成英文名。
+
+### 编辑器已经帮你配好了
+
+仓库里的 [.vscode/settings.json](.vscode/settings.json) 是**面向写作**的配置，
+只作用于 Markdown / MDX（不影响你编辑 TS/TSX 的习惯）：
+
+| 设置 | 为什么 |
+| --- | --- |
+| 关掉行号、缩略图、空白符渲染 | 「像代码」的感觉一半来自这些 |
+| md/mdx 换成中文字体、行高 30 | 不换成非等宽字体，满屏 `#` `\|` 怎么都像在看代码 |
+| 每行 80 列换行 + 一条竖线标尺 | 整屏铺满的长行很难读 |
+| `files.trimTrailingWhitespace: false` | ⚠️ **这条别删**：Markdown 里行尾两个空格表示换行，被自动删掉就静默改了内容 |
+| 切窗口时自动保存 | 从 VS Code 切到浏览器时已经存好了，页面也刷新好了 |
+
+不喜欢哪条就删哪条，删掉就回到 VS Code 默认值；整套不要就把那个文件删了，**不影响构建**。
+
+[.vscode/blog.code-snippets](.vscode/blog.code-snippets) 里还有几个片段，
+打前缀 + `Tab` 展开，日常写作就不用记那些「像代码」的写法了：
+
+| 打这个 + Tab | 得到 |
+| --- | --- |
+| `post` | 完整的 frontmatter 骨架（日期自动填今天） |
+| `callout` | 提示框 |
+| `bili` | B 站视频 |
+| `audio` | 音频播放器 |
+| `img` | 图片语法 |
+| `math` | 行间公式 |
+
+### 插图片
+
+**把图片文件丢进 `public/images/`，然后在文章里写 `![](/images/文件名.jpg)`。**
+
+路径怎么写都能认 —— 下面几种等价，怎么方便怎么来（`resolveImageSrc()` 会统一规整）：
+
+| 写法 | 结果 |
+| --- | :---: |
+| `/images/x.jpg` | ✅ |
+| `public/images/x.jpg` | ✅ |
+| `images/x.jpg` | ✅ |
+| `public\images\x.jpg`（Windows 反斜杠） | ✅ |
+
+> **上传前先压一下。** 这个项目**不做图片优化**（静态导出下 `next/image` 的优化器
+> 不可用，见[为什么不做图片优化](#为什么不做图片优化)），原图多大就下发多大。
+> 一张 3.6MB 的 PNG 会让手机读者等很久 —— 转成 JPEG/WebP 通常能小一个数量级。
+
+### 发布
+
+```bash
+git add .
+git commit -m "post: 文章标题"
+git push
+```
+
+然后等 1–2 分钟，Cloudflare 会自动重新构建。
+
+**不想碰命令行就用 [GitHub Desktop](https://desktop.github.com/)**：
+它会列出你改动的文件，填一句说明，点 `Commit to main` 再点 `Push origin` 就完事了。
+
+### 用 Typora / Obsidian 写
+
+如果连 Markdown 标记都不想看见，可以用所见即所得的编辑器 —— **现在两款都能直接编辑了**：
+
+| 软件 | 特点 | 价格 |
+| --- | --- | --- |
+| [Typora](https://typora.io/) | 真·所见即所得，输入时直接显示排版后的样子 | 约 $15 买断 |
+| [Obsidian](https://obsidian.md/) | 可以把文章目录当作文库打开，实时预览，拖图能自动放进附件目录 | 免费 |
+
+**两条使用要点：**
+
+1. **文章存成 `.md`。** 这两款原生只认 `.md`，不显示 `.mdx`
+   （`.mdx` 在 Obsidian 里根本不出现在文件树中）。
+   仓库两种后缀都收，所以直接存 `.md` 就行。
+2. **⚠️ Obsidian 的「仓库」要开在 `content/posts` 本身，不要开在它下面的某个子文件夹。**
+
+   Obsidian 会在仓库根目录生成一个 `.obsidian/` 配置文件夹（已加进 `.gitignore`），
+   而**文章目录的子文件夹不会被扫描** —— `content/posts/` 下的文章是按
+   「一层文件名」收集的（`src/lib/posts.ts` 的 `listPostFiles()` 不做递归）。
+   把仓库开成 `content/posts/Blog`，你在里面写的文章**一篇都不会出现在站点上**，
+   而且不会报错。这是这个流程里唯一需要记住的坑。
+
+> **Typora 的保存行为**：它在部分平台保存时会把 `.mdx` 改名成 `.md`。
+> 因为这个仓库两种后缀都收，改名不会再让构建失败 —— 但文件确实会被重命名，
+> `git status` 里会看到 rename。介意的话就把文章直接存成 `.md`。
 
 ---
 
@@ -369,27 +567,113 @@ $$
 | ⟳ / ⟲¹ / ⤨ | 循环切换播放模式：**列表循环 → 单曲循环 → 随机播放** |
 | ⏮ / ▶ / ⏭ | 上一首 / 播放暂停 / 下一首（随机模式下「下一首」是随机挑一首） |
 | ☰ | 展开 / 收起**播放列表**，点列表里的任意一首直接播 |
+| 🎤 | 打开 / 关闭**悬浮歌词窗** |
+| 🎛️ | **音效**（原声 / 低音增强 / 人声增强 / 清亮 / 大厅混响） |
 | 🔊 | 静音开关 |
 | 滑杆 | 音量（0–100，实时显示百分比） |
 
-播放模式和音量都会记在浏览器里（`hc-blog:music-mode` / `hc-blog:music-volume`），刷新后保留。
+播放模式、音量、歌词窗开关、音效都会记在浏览器里
+（`hc-blog:music-mode` / `hc-blog:music-volume` / `hc-blog:music-lyrics-open` / `hc-blog:music-effect`），
+刷新后保留。
+
+### 歌词窗
+
+点 🎤 会浮出一个歌词窗：
+
+- **拖动标题栏**移动，**拖右下角**调整大小（位置和大小都记在浏览器里）
+- **自动滚动**：整段歌词连续平移，当前这句始终停在窗口中间（不是跳行）
+- **点某一句可以跳到那个时间点**
+- 换歌会自动重新加载歌词；标题栏第二个按钮恢复默认位置
+
+底栏可以调外观，全都记在浏览器里：
+
+| 控件 | 作用 |
+| --- | --- |
+| `A−` / `A+` | 歌词字号（10–24px） |
+| 🎨 | 配色面板：**跟随主题 / 浅色 / 深色 / 自定义** |
+| 自定义时 | 正文、当前句、背景板各一个取色器 + 背景不透明度滑杆（**拉到 0 就是完全透明**，只剩文字浮在壁纸上） |
+
+配色面板里还有一个开关：**鼠标移开后整块隐藏**，移回来立刻显示（默认开）。
+打开窗口时会先亮 2 秒再决定要不要淡出 —— 否则鼠标还在播放器上时窗口一打开就是透明的。
+
+> 隐藏用的是 `opacity: 0` 而**不是** `pointer-events: none`：
+> 后者会让鼠标再也唤不醒它。
+
+歌词是 `.lrc` 文件，放在 `public/lyrics/`，再在歌单里登记：
+
+```ts
+{
+  id: "my-song",
+  title: "曲名",
+  artist: "歌手",
+  src: withBasePath(musicUrl("我的歌.mp3")),
+  lyrics: withBasePath(lyricUrl("我的歌.lrc")),   // ← 加这一行
+}
+```
+
+**`lyrics` 留空是正常的** —— 歌词窗会显示「这首歌还没有歌词」，不会报错。
+歌单里只有示例曲目一填了歌词，其余刻意留空（真人歌曲的歌词有版权，需要的自己放）。
+格式说明见 [public/lyrics/README.md](public/lyrics/README.md)。
+
+### 音效
+
+🎛️ 里有 5 档，**全部用浏览器自带的 Web Audio API 实时处理，完全免费**：
+
+| 档位 | 效果 |
+| --- | --- |
+| 原声 | 不处理（默认，连音频处理链都不建） |
+| 低音增强 | 抬低频、压高频 |
+| 人声增强 | 抬中频，人声浮出来 |
+| 清亮 | 抬高频，适合钢琴与弦乐 |
+| 大厅混响 | 现场算出一段脉冲响应做混响，不用下载任何音频素材 |
+
+三条实现上的约束（写在 [src/lib/audio-effects.ts](src/lib/audio-effects.ts) 里）：
+
+1. 一个 `<audio>` 只能建一次音频源节点，所以按元素缓存整条链
+2. 建了链之后声音只走 AudioContext，所以每次切音效都要 `resume()`
+3. **外链音频没有 CORS 头，接上会直接没声音** —— 所以外链曲目那个按钮是禁用的
+
+默认是「原声」，不点开就**完全不碰音频管线**，原有播放行为没有任何变化。
 
 ### 换成自己的歌
 
-1. 把音频文件放进 `public/uploads/`
+1. 把音频文件放进 `public/music/`
 2. 在 [src/lib/music.ts](src/lib/music.ts) 的 `defaultPlaylist` 里登记一行
 
 ```ts
 export const defaultPlaylist: Track[] = [
-  { id: "my-song", title: "曲名", artist: "歌手", src: uploadUrl("我的歌.mp3") },
+  { id: "my-song", title: "曲名", artist: "歌手", src: withBasePath(musicUrl("我的歌.mp3")) },
 ];
 ```
 
-`uploadUrl()` 会自动做 URL 编码 —— 中文文件名和空格都能正常播放，别手写 `/uploads/xxx`。
+`musicUrl()` 会自动做 URL 编码 —— 中文文件名和空格都能正常播放，别手写 `/music/xxx`。
 
-> 仓库里现在有一首 mp3（`白鲨jaws-dive back in time.mp3`）和三段用脚本生成的
-> `demo-0*.wav` 占位音频。**这三段 demo 只是为了让你点开就能听到声音**，
-> 不需要就删掉文件并从 `defaultPlaylist` 里移除对应条目。
+> **文件名里的 `&` 不用怕**：播放器按 URL 编码取文件，
+> `街道办GDC&欧阳耀莹-春娇与志明.mp3` 这种名字能正常播。
+> 但如果文件名里出现了 `&amp;` 这种转义残留（某些下载工具会这样），要改回 `&`。
+
+### 加歌词：`npm run lyrics`
+
+```bash
+# 1. 按歌单生成一套待填模板（每个模板顶部写清了是哪首歌）
+npm run lyrics:init
+
+# 2. 把歌词粘进 lyrics-src/*.txt（注释行下面直接贴，一行一句）
+#    带时间轴的 LRC 整段贴进去也认
+
+# 3. 导入
+npm run lyrics
+```
+
+脚本会自己把文件转成 `public/lyrics/<id>.lrc`（补好 `[ti:]` / `[ar:]`），
+并在 `src/lib/music.ts` 对应条目里插好 `lyrics:` 那一行。
+**没填的模板会被跳过**，不会生成一堆空歌词文件，跑完会提示还剩几首待填。
+完整说明见 [public/lyrics/README.md](public/lyrics/README.md)。
+
+> ⚠️ **版权**：音乐和歌词都是受版权保护的作品，而这个博客是**公开仓库** ——
+> 把音频 / 歌词提交进去等于公开分发。只放你有权利放的内容
+> （自己写的、已授权的、公有领域的，或从正版渠道购买后自用的）。
+> 脚本不会替你去网站抓取歌词，歌词文本需要你自己提供。
 
 ---
 
@@ -424,7 +708,7 @@ export const defaultPlaylist: Track[] = [
 索引在**构建期**生成成一份静态 JSON：
 
 ```text
-content/posts/*.mdx
+content/posts/*.md(x)
    ↓ src/lib/posts.ts 的 getSearchIndex()（去掉 Markdown 语法，保留代码内容）
    ↓ src/app/search-index.json/route.ts
 out/search-index.json          ← 构建产物，6 篇约 22KB
@@ -450,9 +734,9 @@ out/search-index.json          ← 构建产物，6 篇约 22KB
 | 方式 | 说明 | 谁看得到 |
 | --- | --- | --- |
 | 内置预设 | 7 套纯 CSS 渐变/网格（水墨、蓝图、纸纹、木棉、岭南、珠江夜、暮色）+「无」 | 所有人 |
-| **上传到仓库** | 提交到 `public/uploads/`，之后出现在「我的上传」里随时选用 | **所有访客** |
+| **上传到仓库** | 提交到 `public/wallpapers/`，之后出现在「我的上传」里随时选用 | **所有访客** |
 | 只存本机 | 压缩后存进浏览器 `localStorage`，不上传任何服务器 | 只有你自己 |
-| 图片直链 | 粘贴 `https://…`、`/uploads/bg.jpg` 或 `data:image/…` | 所有人 |
+| 图片直链 | 粘贴 `https://…`、`/wallpapers/bg.jpg` 或 `data:image/…` | 所有人 |
 
 还有两个滑杆：
 
@@ -462,9 +746,9 @@ out/search-index.json          ← 构建产物，6 篇约 22KB
 > **提示**：有壁纸时，外壳、顶栏、左侧导航、留言区会自动变成毛玻璃
 > （半透明 + `backdrop-blur`），壁纸才能真正透出来。
 
-### 不用后端，怎么把图片传进 `public/uploads/`？
+### 不用后端，怎么把图片传进 `public/wallpapers/`？
 
-`public/uploads/` 是仓库里的目录，浏览器不能直接写服务器文件系统。
+`public/wallpapers/` 是仓库里的目录，浏览器不能直接写服务器文件系统。
 纯静态站要「上传」，只有两条真正可行的路：
 
 1. **TinaCMS 媒体库**（项目里已经装好了）
@@ -502,7 +786,7 @@ owner / repo / branch 会自动带出默认值（从 `src/lib/site.ts` 的 `SITE
 ### 上传后为什么要等 1–2 分钟
 
 「上传到仓库」会提交一次 commit，Cloudflare Pages 检测到更新后重新构建部署，
-这个过程大约 1–2 分钟。在这之前，站内的 `/uploads/xxx.jpg` 还是 404。
+这个过程大约 1–2 分钟。在这之前，站内的 `/wallpapers/xxx.jpg` 还是 404。
 
 为了不让用户对着空白发呆，上传成功后会自动记下一个**临时地址**
 （`raw.githubusercontent.com` 上的原始文件，提交完立即可用），
@@ -521,7 +805,7 @@ owner / repo / branch 会自动带出默认值（从 `src/lib/site.ts` 的 `SITE
 export const DEFAULT_WALLPAPER: WallpaperSettings = {
   source: "preset",
   presetId: "ink",   // ← 换成 "none" 就没有默认壁纸；也可填 "kapok" / "lingnan" …
-  url: "",           // 也可以填 "/uploads/你上传的图.jpg" 当成全站默认壁纸
+  url: "",           // 也可以填 "/wallpapers/你上传的图.jpg" 当成全站默认壁纸
   dataUrl: "",
   strength: 100,
   blur: 0,
@@ -639,7 +923,7 @@ push 之后 Cloudflare 重新构建，对所有访客生效。
 `content/site-settings.json`，同样需要 GitHub Token。按钮上方会提示
 「当前设置和站点默认值有哪些不同」。
 
-> 想用**上传到仓库的壁纸**当全站默认：把 `wallpaper.url` 填成 `/uploads/你的图.jpg`、
+> 想用**上传到仓库的壁纸**当全站默认：把 `wallpaper.url` 填成 `/wallpapers/你的图.jpg`、
 > `source` 改成 `"url"` 即可。
 
 **恢复**：设置抽屉底部的「恢复站点默认值」会清掉本机偏好，回到仓库里的那一套。
@@ -1026,8 +1310,8 @@ Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** →
 | 变量 | 值 | 必需 |
 | --- | --- | :---: |
 | `NODE_VERSION` | `22` | ✅ |
-| `NEXT_PUBLIC_TINA_CLIENT_ID` | TinaCloud 项目 ID | 要用后台就填 |
-| `TINA_TOKEN` | TinaCloud 读写 token | 要用后台就填 |
+| `NEXT_PUBLIC_TINA_CLIENT_ID` | TinaCloud 项目 ID（公开信息） | 要用后台就填 |
+| `TINA_TOKEN` | TinaCloud **只读** token（Read Only） | 要用后台就填 |
 
 > 没配 TinaCloud 时，`npm run build` 会在 `tinacms build` 那一步停下。
 > 这时把 Build command 改成 `npm run build:app` 就能先把前台发出去，
@@ -1044,7 +1328,7 @@ CF 托管的域名会自动配好证书；域名不在 CF 的话，先把 NS 转
 
 **缓存策略已经内置**：[public/_headers](public/_headers) 会被复制进 `out/`，
 Cloudflare Pages 会自动读取它（这个文件本身不会被当成静态资源下发）：
-`_next/static/*` 永久缓存、`/uploads/*` 缓存一天、`/rss.xml` 带正确的 MIME 并交给 ETag 校验，
+`_next/static/*` 永久缓存、`/images/*` `/wallpapers/*` `/music/*` `/lyrics/*` `/uploads/*` 缓存一天、`/rss.xml` 带正确的 MIME 并交给 ETag 校验，
 其余请求加上几条基础安全头。
 
 > 注意 Cloudflare 的规则语义：**一个请求匹配多条规则时，同名 Header 是用逗号拼接的**，
@@ -1221,15 +1505,27 @@ docker build \
 
 1. 用 GitHub 账号登录 <https://app.tina.io>
 2. 创建项目，关联这个博客仓库，分支填 `main`
-3. 项目设置里能拿到：
-   - **Client ID** → 填给 `NEXT_PUBLIC_TINA_CLIENT_ID`
-   - **Read Only Token** → 只读场景用
-   - **Read/Write Token** → **构建和写作都需要它**，填给 `TINA_TOKEN`
-4. 本地写进 `.env.local`；线上写进部署平台的环境变量
-5. 重新部署，然后访问 `https://<你的域名>/admin/index.html`
+3. 项目里能拿到两样东西，分别在两个选项卡：
+   - **Client ID**（「概述 / Overview」选项卡）→ 填给 `NEXT_PUBLIC_TINA_CLIENT_ID`，
+     它本来就是公开的，写进前端也没关系
+   - **Read Only Token**（「令牌 / Tokens」选项卡，新建时选 **Read Only**）→ 填给 `TINA_TOKEN`
+4. 建 token 时把 **Git 分支**填成 `main` —— 那是「这个 token 能读哪些分支」的白名单
+5. 本地写进 `.env.local`；线上写进部署平台的环境变量
+6. 重新部署，然后访问 `https://<你的域名>/admin/index.html`
 
-为什么构建也需要读写 token：`tinacms build` 会顺带把内容**索引**上传到 TinaCloud，
-这样后台里的搜索和关系字段才能工作。
+**为什么「只读」token 就够**（这一节曾经写成「读写 token」，2026-10 按官方文档更正）：
+
+- **写权限不来自这个 token**，而是你在 `/admin` 里**用 TinaCloud 账号登录**后拿到的会话。
+  保存文章走的是那个登录态，跟静态 token 无关。所以 TinaCloud 的令牌选项里
+  本来就没有「读写」这一项，只有 **Read Only** 和 **Search** 两种。
+- **Search token 是另一回事**，它只服务于 TinaCMS 内置的内容搜索
+  （配置项 `search.tina.indexerToken`）。本仓库**没有启用**它 ——
+  `tina/config.ts` 里没有 `search` 字段，站内搜索是自建的 `search-index.json`
+  （见 [站内搜索](#站内搜索)），所以不需要建 search token。
+
+来源：[使用 TinaCloud 进行生产部署](https://tina.io/zh/docs/tinacloud/overview)、
+[Configuring TinaCloud](https://tina.io/tinadocs/docs/going-live/tinacloud/configuring-tinacloud)、
+[只读令牌说明](https://tina.io/zh/blog/read-only-tokens-content-anytime)。
 
 > `TINA_TOKEN` 是敏感信息，不要提交到仓库。
 > [.gitignore](.gitignore) 已经忽略了除 `.env.example` 之外的所有 `.env*` 文件。
@@ -1275,7 +1571,7 @@ Windows 本地出现的概率较高，原因和绕法见下面的「疑难排查
 线上（Linux）一般不会遇到。
 
 **图片/音频不显示**
-`public/` 下新增的资源要重新构建才会进入 `out/`；`public/uploads/` 里的文件
+`public/` 下新增的资源要重新构建才会进入 `out/`；`public/images/` 等资源目录里的文件
 记得一起提交到仓库。
 
 **改了文章但线上没更新**
@@ -1342,12 +1638,12 @@ Giscus 需要 `content/site-settings.json` 里 `giscus` 配置完整
 
 **列表页卡片的缩略图 404，但点进文章图是好的**
 两者的地址由同一个 `resolveImageSrc()` 生成，理论上不会不一致。
-真出现的话先确认图片确实提交到了 `public/uploads/`（`git status` 看一眼），
+真出现的话先确认图片确实提交到了 `public/images/`（`git status` 看一眼），
 再确认子路径部署时 `NEXT_PUBLIC_BASE_PATH` 是构建时设的而不是运行时设的。
 
 **`cover` 填了但卡片上没变化**
 `cover` 要写在 frontmatter 里（不是正文里），值必须是站内绝对路径
-（`/uploads/x.jpg`）或 http(s) 外链；`data:` 内联图片会被忽略。
+（`/images/x.jpg`）或 http(s) 外链；`data:` 内联图片会被忽略。
 另外**有封面的卡片不会再显示正文缩略图带**，这是有意的。
 
 ---
@@ -1469,7 +1765,7 @@ MDX 正文里的图片走 `src/mdx-components.tsx` 里覆写的原生 `<img>`（
 <details>
 <summary>如果以后真的需要图片优化，有这三条路</summary>
 
-1. **构建期预处理**：写个脚本用 `sharp` 把 `public/uploads/` 里的图压成 WebP
+1. **构建期预处理**：写个脚本用 `sharp` 把 `public/images/` 里的图压成 WebP
    并生成多尺寸，缺点是构建变慢、要自己维护
 2. **外部图床 / CDN**：`images: { loader: "custom", loaderFile: "./image-loader.ts" }`
    指向 Cloudinary 之类的服务，缺点是多一个外部依赖

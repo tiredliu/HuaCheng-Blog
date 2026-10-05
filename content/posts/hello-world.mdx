@@ -1,7 +1,10 @@
 ---
 title: 你好，世界：这个博客是怎么搭起来的
 date: 2025-06-18
-tags: [Next.js, MDX, Cloudflare]
+tags:
+  - Next.js
+  - MDX
+  - Cloudflare
 summary: 从毛坯房到能住人——记录一次用 Next.js 静态导出 + TinaCMS + Cloudflare Pages 搭个人博客的完整过程，以及为什么最后选了纯静态。
 author: 花城
 ---
@@ -95,15 +98,14 @@ Server Actions、请求相关的 Route Handler、`cookies()`、ISR、默认的�
 <BilibiliVideo bvid="BV1xx411c7mD" title="示例视频 · 把 bvid 换成你自己的" />
 
 音乐同理，用原生 `<audio>` 就够了。侧栏那个迷你播放器读的是
-`src/lib/music.ts` 里的歌单，把 mp3 丢进 `public/uploads/` 再登记一条就行。
+`src/lib/music.ts` 里的歌单，把 mp3 丢进 `public/music/` 再登记一条就行。
 
-<AudioPlayer src="/uploads/demo-01.wav" title="示例曲目一 · 琶音" artist="本站生成" />
+<AudioPlayer src="/music/空中散歩-CIEL.mp3" title="空中散歩" artist="CIEL" />
 
-<Callout type="info" title="这只是占位音频">
-上面这条指向 `public/uploads/demo-01.wav`，是仓库里自带的一段几秒钟的示例音，
-用来让播放器「点开就有声音」。
+<Callout type="info" title="曲目都放在 public/music/ 里">
+上面这条指向 `public/music/空中散歩-CIEL.mp3`，就是侧栏播放器歌单里的同一份文件。
 
-换成你自己的音频：把文件放进 `public/uploads/`，再把 `src` 改成对应路径即可。
+换成你自己的音频：把文件放进 `public/music/`，再把 `src` 改成对应路径即可。
 **注意路径要对得上**——指向不存在的文件时，浏览器控制台会看到一条 404。
 </Callout>
 

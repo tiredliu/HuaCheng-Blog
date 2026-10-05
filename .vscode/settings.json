@@ -1,0 +1,51 @@
+// ─────────────────────────────────────────────────────────────────────────
+// 面向「写作」而不是「写代码」的编辑器配置。
+//
+// 下面这一整块只作用于 Markdown / MDX —— 你编辑 TS/TSX 时的习惯不受影响。
+// 每一项都能单独删掉，删掉就回到 VS Code 的默认值。
+// 想彻底关掉这套：把本文件删掉即可（它不会影响构建）。
+// ─────────────────────────────────────────────────────────────────────────
+{
+  // 多个语言 id 可以写在一个方括号里。`mdx` 需要装 MDX 扩展
+  // （unifiedjs.vscode-mdx）才有语法高亮；没装也不影响下面这些设置。
+  "[markdown][mdx]": {
+    // —— 拿掉「代码感」最直接的几条 ——
+    "editor.lineNumbers": "off",
+    "editor.minimap.enabled": false,
+    "editor.stickyScroll.enabled": false,
+    "editor.renderWhitespace": "none",
+    "editor.occurrencesHighlight": "off",
+    "editor.selectionHighlight": false,
+
+    // 换成中文字体。不换成非等宽字体，满屏的 # 和 | 怎么都像在看代码。
+    "editor.fontFamily": "'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif",
+    "editor.fontSize": 16,
+    "editor.lineHeight": 30,
+
+    // 每行限制在 80 列以内再自动换行（大约 40 个汉字）。
+    // 一整屏铺满的长行非常难读，这是写作编辑器最值得调的一项。
+    // 不喜欢就把这两行连同下面的 rulers 一起删掉。
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 80,
+    "editor.rulers": [80],
+
+    // ⚠️ 这一条别删：Markdown 里「行尾两个空格」表示强制换行，
+    // 一旦被自动去掉，渲染出来的段落就变了 —— 属于静默改内容。
+    "files.trimTrailingWhitespace": false,
+
+    // 段落之间敲空行时不要自作主张缩进
+    "editor.autoIndent": "none",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
+  },
+
+  // 切到别的窗口（比如浏览器看预览）时自动保存，
+  // 配合 `npm run dev` 就是「切过去 → 页面已经刷新好了」
+  "files.autoSave": "onFocusChange",
+  "files.insertFinalNewline": true,
+
+  // VS Code 自带的 Markdown 预览窗口（Ctrl+K V）也调大一点字号。
+  // 注意：它不认 MDX 组件，真正的预览还是看 `npm run dev` 的浏览器。
+  "markdown.preview.fontSize": 16,
+  "markdown.preview.fontFamily": "'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif"
+}

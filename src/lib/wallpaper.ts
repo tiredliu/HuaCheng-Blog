@@ -104,7 +104,7 @@ export interface WallpaperSettings {
   source: WallpaperSource;
   /** source === "preset" 时生效 */
   presetId: string;
-  /** source === "url" 时生效，例如 https://... 或 /uploads/bg.jpg */
+  /** source === "url" 时生效，例如 https://... 或 /wallpapers/bg.jpg */
   url: string;
   /** source === "upload" 时生效，压缩后的 data URL（只存本机） */
   dataUrl: string;
@@ -146,9 +146,9 @@ export function isWallpaperSettings(value: unknown): boolean {
 
 export interface WallpaperUpload {
   id: string;
-  /** 站内路径，例如 /uploads/xxx.jpg */
+  /** 站内路径，例如 /wallpapers/xxx.jpg */
   url: string;
-  /** 仓库内路径，例如 public/uploads/xxx.jpg */
+  /** 仓库内路径，例如 public/wallpapers/xxx.jpg */
   path: string;
   name: string;
   /** 字节数 */
@@ -158,7 +158,7 @@ export interface WallpaperUpload {
   thumb: string;
   /**
    * 部署完成前的临时地址（GitHub 原始文件）。
-   * Cloudflare 重新构建要 1–2 分钟，这期间站内的 /uploads/xxx 还是 404，
+   * Cloudflare 重新构建要 1–2 分钟，这期间站内的 /wallpapers/xxx 还是 404，
    * 用它可以立刻看到效果；探测到正式地址可用后会自动清掉。
    */
   fallbackUrl?: string;

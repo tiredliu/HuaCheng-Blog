@@ -6,7 +6,7 @@
 
 想清掉这些示例资源，把下面三样一起删掉即可：
 
-    public/uploads/demo-*.jpg
+    public/images/demo-*.jpg
     content/posts/image-cover-demo.mdx
     content/posts/image-thumbnails-demo.mdx
     scripts/make-demo-images.py
@@ -28,9 +28,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-# 输出目录：仓库根的 public/uploads
+# 输出目录：仓库根的 public/images（文章配图与封面都放这里，见 src/lib/assets.ts）
 ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "public" / "uploads"
+OUT_DIR = ROOT / "public" / "images"
 
 # 站点调色板：木棉红 / 岭南青是博客的主题色，其余为配套的冷暖色
 PALETTE = [

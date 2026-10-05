@@ -37,6 +37,14 @@ export interface PostMeta {
 export interface Post extends PostMeta {
   /** 原始 MDX 正文（不含 frontmatter） */
   source: string;
+  /**
+   * 磁盘上的真实文件名（含扩展名，例如 `hello-world.mdx`）。
+   *
+   * 文章可以是 `.mdx` 也可以是 `.md` —— Typora / Obsidian 这类写作工具原生只认 `.md`，
+   * 而 Typora 在某些平台上保存时还会把 `.mdx` 改名成 `.md`。
+   * `slug` 两者相同，所以文章页必须靠这个字段才知道该 import 哪个文件。
+   */
+  fileName: string;
 }
 
 export interface TocItem {
@@ -64,8 +72,8 @@ function stripCode(source: string): string {
  * 从 MDX 正文里提取插入的图片（构建期执行）。
  *
  * 支持的两种写法：
- * - Markdown：`![说明](/uploads/x.jpg)`
- * - 原生标签：`<img src="/uploads/x.jpg" />`
+ * - Markdown：`![说明](/images/x.jpg)`
+ * - 原生标签：`<img src="/images/x.jpg" />`
  *
  * 刻意**跳过 data URL 与相对路径**：前者会让卡片背上几百 KB 的 base64，
  * 后者在列表页（URL 层级不同）会解析到错误的位置。
@@ -76,9 +84,9 @@ export function extractImages(source: string, limit = CARD_IMAGE_LIMIT): string[
   const found: string[] = [];
 
   const patterns = [
-    // ![说明](/uploads/x.jpg "可选标题")
+    // ![说明](/images/x.jpg "可选标题")
     /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
-    // <img src="/uploads/x.jpg" …>
+    // <img src="/images/x.jpg" …>
     /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi,
   ];
 
@@ -142,6 +150,31 @@ export function countWords(source: string): number {
 
 function readPostFile(fileName: string): Post {
   const slug = fileName.replace(/\.mdx?$/, "");
+
+  /**
+   * 文件名必须是 ASCII。
+   *
+   * 非 ASCII（中文）文件名会让这篇文章**打不开**：Next 拿 URL 里已编码的路径段
+   * 去和 `generateStaticParams()` 的返回值比，中文永远不相等 ——
+   * dev 下 500/404，产物里还会出现 `out/posts/中文名/` 这种目录。
+   * 详见 AI_CONTEXT 硬约束 9。
+   *
+   * 这条检查是**故意加的**，起因是 Obsidian 新建笔记的默认名就是「未命名」——
+   * 一个中文名，而它在 Obsidian 里看不出任何异常。
+   * 没有这条检查的话，失败方式是「文章悄悄不出现」，最难查。
+   *
+   * dev 下只警告（否则整个开发服务器会跟着报错，太吵）；
+   * 构建时直接抛错 —— 让它在**部署之前**就停下来。
+   */
+  if (!/^[A-Za-z0-9._-]+$/.test(slug)) {
+    const message =
+      `文章文件名必须是 ASCII：content/posts/${fileName}\n` +
+      `  非 ASCII（中文）文件名会让这篇文章打不开：dev 下 500/404，产物目录名也会变成中文。\n` +
+      `  把它改成英文 / 数字 / 连字符即可；标题写在 frontmatter 的 title 里，不受影响。`;
+    if (process.env.NODE_ENV === "production") throw new Error(message);
+    console.warn(`[posts] ${message}`);
+  }
+
   const raw = fs.readFileSync(path.join(POSTS_DIR, fileName), "utf8");
   const { data, content } = matter(raw);
   const stat = fs.statSync(path.join(POSTS_DIR, fileName));
@@ -162,6 +195,7 @@ function readPostFile(fileName: string): Post {
     draft: data.draft === true,
     wordCount: countWords(content),
     source: content,
+    fileName,
   };
 }
 
@@ -204,6 +238,13 @@ function buildSummary(source: string): string {
   return plain.length > 96 ? `${plain.slice(0, 96)}…` : plain;
 }
 
+/**
+ * 文章文件：`.mdx` 和 `.md` 都收。
+ *
+ * 两种扩展名走的是**同一条 MDX 管线**（`@next/mdx` 默认就同时处理这两个后缀），
+ * 所以 `.md` 里照样能用 `<Callout>`、Shiki 高亮和 KaTeX 公式 —— 区别只在文件名。
+ * 这样 Typora / Obsidian 就能直接编辑（它们原生只认 `.md`）。
+ */
 function listPostFiles(): string[] {
   if (!fs.existsSync(POSTS_DIR)) return [];
   return fs.readdirSync(POSTS_DIR).filter((file) => /\.mdx?$/.test(file));
@@ -219,9 +260,9 @@ export function getAllPosts(options: { includeDrafts?: boolean } = {}): Post[] {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-/** 只取元信息，避免把整篇正文传进客户端组件 */
+/** 只取元信息，避免把整篇正文传进客户端组件（`fileName` 也只在服务端用） */
 export function getAllPostMeta(options?: { includeDrafts?: boolean }): PostMeta[] {
-  return getAllPosts(options).map(({ source: _source, ...meta }) => meta);
+  return getAllPosts(options).map(({ source: _source, fileName: _fileName, ...meta }) => meta);
 }
 
 export function getPostBySlug(slug: string): Post | null {

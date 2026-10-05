@@ -5,7 +5,7 @@ tags: [内容工程]
 summary: 一篇用来验收「正文配图 / 文章页配图排版 / 列表页卡片背景图」的测试文章。配图由 scripts/make-demo-images.py 生成，验收完可以整篇删掉。
 author: 花城
 draft: false
-cover: /uploads/demo-cover.jpg
+cover: /images/demo-cover.jpg
 ---
 
 > **这是一篇测试文章。**
@@ -15,7 +15,7 @@ cover: /uploads/demo-cover.jpg
 >
 > - `content/posts/image-cover-demo.mdx`（本篇）
 > - `content/posts/image-thumbnails-demo.mdx`（对照文章）
-> - `public/uploads/demo-*.jpg` 与 `scripts/make-demo-images.py`
+> - `public/images/demo-*.jpg` 与 `scripts/make-demo-images.py`
 
 ## 先在列表页看那张卡片
 
@@ -42,18 +42,18 @@ cover: /uploads/demo-cover.jpg
 下面是五张编号配图，用的是 Markdown 的图片语法：
 
 ```md
-![正文配图 1 · 木棉红](/uploads/demo-01.jpg)
+![正文配图 1 · 木棉红](/images/demo-01.jpg)
 ```
 
-![正文配图 1 · 木棉红](/uploads/demo-01.jpg)
+![正文配图 1 · 木棉红](/images/demo-01.jpg)
 
-![正文配图 2 · 岭南青](/uploads/demo-02.jpg)
+![正文配图 2 · 岭南青](/images/demo-02.jpg)
 
-![正文配图 3 · 珠江蓝](/uploads/demo-03.jpg)
+![正文配图 3 · 珠江蓝](/images/demo-03.jpg)
 
-![正文配图 4 · 暮色紫](/uploads/demo-04.jpg)
+![正文配图 4 · 暮色紫](/images/demo-04.jpg)
 
-![正文配图 5 · 落日橙](/uploads/demo-05.jpg)
+![正文配图 5 · 落日橙](/images/demo-05.jpg)
 
 每张图上都有编号、色名和文件名 —— 这样在列表页瞄一眼缩略图，
 就能对上「第几张、哪一张」，不用猜。
@@ -63,8 +63,8 @@ cover: /uploads/demo-cover.jpg
 卡片上的缩略图是从正文里自动抠出来的，Markdown 和原生标签两种写法都支持：
 
 ```mdx
-![说明文字](/uploads/demo-01.jpg)      ← Markdown 语法
-<img src="/uploads/demo-02.jpg" alt="说明文字" />   ← 原生标签
+![说明文字](/images/demo-01.jpg)      ← Markdown 语法
+<img src="/images/demo-02.jpg" alt="说明文字" />   ← 原生标签
 ```
 
 被刻意**跳过**的有三类：

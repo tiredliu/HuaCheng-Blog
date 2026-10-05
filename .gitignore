@@ -51,3 +51,16 @@ next-env.d.ts
 
 # 上传的媒体文件按需提交，默认不忽略
 !public/uploads
+
+# 歌词导入的「待处理目录」：只是导入时的暂存区，脚本会把它转成 public/lyrics/*.lrc
+# 而且里面常放着尚未确认授权的文本，不进版本库
+/lyrics-src
+
+# 本地写作工具留下的配置。
+# Obsidian 会把 .obsidian/ 建在「仓库」根目录 —— 如果把仓库开在 content/posts，
+# 这个目录就会出现在内容目录里，属于纯噪音，不进版本库。
+.obsidian/
+.trash/
+
+# AI 工作区（会话记忆、预览页、临时脚本与备份），不属于项目源码
+/.workbuddy/

@@ -14,7 +14,8 @@
 | --- | --- |
 | 是什么 | 个人博客，纯静态（构建期生成 HTML，运行期没有 Node） |
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
-| 内容在哪 | `content/posts/*.mdx`（frontmatter + 正文），**这是唯一的内容真相来源** |
+| 内容在哪 | `content/posts/*.md(x)`（frontmatter + 正文），**这是唯一的内容真相来源**。`.md` 与 `.mdx` **等价**，都走 MDX 管线 |
+| 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
 | 公开留言/评论 | `content/guestbook.json` + `content/comments.json`（只有站长能写，构建期读取） |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
 | 可选后端 | `workers/blog-api/`（Cloudflare Worker + KV：浏览量/点赞/评论；**独立部署，不参与 next build**） |
@@ -27,6 +28,7 @@
 ```bash
 npm install
 npm run dev          # http://localhost:3000，后台 /admin
+npm run new          # 新建一篇文章（自动 ASCII 文件名 + frontmatter）
 npm run build        # 静态导出到 out/
 ```
 
@@ -40,9 +42,10 @@ npx tsc --noEmit && npx eslint . && npx next build
 
 ---
 
-## 二、必须知道的 11 条硬约束
+## 二、必须知道的 13 条硬约束
 
 违反这些会「构建成功但线上坏掉」，或者让 dev 直接 500。前 4 条最要命。
+第 12 条是唯一一条**违反了也不会报错**的 —— 它只会让内容悄悄变样。
 
 ### 1. `images: { unoptimized: true }` 不能删
 
@@ -137,6 +140,34 @@ React 19 的 `react-hooks/set-state-in-effect` 会直接报错。
 忘了补不会坏，会落到 `tag-xxxx` 的兜底 slug，只是不好看。
 两个标签算出同一个 slug 会让**构建直接失败**（故意的，静默合并更难查）。
 
+#### 这条对**文章文件名**同样成立（2026-10 实测）
+
+```text
+content/posts/中文文件名测试.mdx   ← 文件确实存在
+
+/posts/hello-world/           → 200 ✅
+/posts/image-cover-demo/      → 200 ✅
+/posts/中文文件名测试/          → 500 / 404 ❌
+```
+
+静态产物里也真的出现了 `out/posts/中文文件名测试/` 这样的目录名，
+和当初 `out/tags/部署/` 一模一样。
+
+**所以文章的文件名必须是 ASCII**（小写字母 + 数字 + 连字符）。
+（这跟扩展名无关：`中文.md` 和 `中文.mdx` 一样打不开。）
+
+**`src/lib/posts.ts` 里有构建期检查**：非 ASCII 的 slug 在
+`NODE_ENV=production` 时**直接 throw**（信息里带文件名），dev 下只 `console.warn`
+（否则整个开发服务器都会跟着报错，太吵）。
+起因是 Obsidian 新建笔记的默认名就是「未命名」—— 在 Obsidian 里看不出任何异常。
+`npm run new` 也会挡下中文输入、退回 `post-<日期>`。
+
+⚠️ **还有一个没修的雷**：`tina/config.ts` 的 `ui.filename.slugify` 是
+`[^\w\u4e00-\u9fa5-]` —— **它保留汉字**。也就是说在网页后台新建文章时，
+默认文件名会跟着中文标题走。目前靠人工改文件名躲过去（线上那篇 `test_1.mdx` 就是），
+但迟早会踩。要修就把那个正则里的 `\u4e00-\u9fa5` 拿掉，
+让它生成 ASCII 名字（改完要同步 README 里关于后台文件名的那一段）。
+
 ### 10. `data-scroll-behavior="smooth"` 不能删
 
 站点在 `globals.css` 里给 `<html>` 设了 `scroll-behavior: smooth`。
@@ -157,8 +188,60 @@ frontmatter 的 `cover`。任何一处自己拼 `basePath`，子路径部署
 （GitHub Pages 项目页）时就会出现「正文的图好好的、列表页缩略图 404」
 这种**只在子路径构建才暴露**的不一致。
 
+「省略了前导斜杠」的目录清单在 `src/lib/assets.ts` 的 `ASSET_DIR_LIST` 里，
+和 `resolveImageSrc()` **共用同一份** —— 加资源目录只改那一处。
+
 另外，卡片上「有 cover 就不显示正文缩略图带」是**有意的**，别顺手改成两个都显示
 （两种图片语言堆在同一张卡片里很难看）。
+
+### 12. 文章的 `.md` / `.mdx` 靠 `next.config.ts` 里两行撑着，**缺一不可**
+
+`content/posts/` 下的文章 `.md` 和 `.mdx` **等价**（Typora / Obsidian 原生只认 `.md`）。
+这件事全靠 `createMDX({...})` 上的两项配置：
+
+```ts
+createMDX({
+  extension: /\.mdx?$/,        // ① 默认只匹配 .mdx
+  options: { format: "mdx" },  // ② 默认 'detect' 会按扩展名把 .md 当纯 Markdown
+})
+```
+
+| 删掉哪一行 | 后果 |
+| --- | --- |
+| `extension` | `.md` 文件没有 loader → Turbopack 报 `Unknown module type`，**构建失败**（响的，好查） |
+| `options.format` | ⚠️ **`.md` 里的 JSX 被静默丢掉** —— `<Callout>` 标签消失、只剩里面的文字；`{1 + 1}` 原样输出。**页面不报错，只是所有富文本组件变成普通段落**（不响的，极难发现） |
+
+根因：`@mdx-js/mdx` 的 `format` 默认 `'detect'`，而它按扩展名猜 ——
+扩展名落在 `mdExtensions`（含 `.md`）里就按纯 Markdown 编译。完整推导见 design.md 7.1 / 17.16。
+
+**改这两行之前先做那个对照实验**：同一份内容存成 `.md` 和 `.mdx`，
+里面放 `<Callout>` 和 `{1 + 1}`，构建后比对两份 HTML 是否一致。
+
+**另外一处别动**：文章页的 import 必须写成
+
+```ts
+await import(`@/content/posts/${post.fileName}`)   // fileName 含扩展名
+```
+
+**不要**改成按扩展名分两个分支（`? import(…${slug}.md) : import(…${slug}.mdx)`）。
+Turbopack 为每个模板字面量生成一个「上下文」，而**上下文不能为空** ——
+仓库里没有 `.md` 文章时，`.md` 那个分支会让整个构建报
+`Can't resolve '@/content/posts/' <dynamic> '.md'`。
+那种写法等于给仓库加了一条隐式约束「必须至少留一篇 .md」，而且报错看不出因果。
+
+### 13. 音频音效链：只建一次、只在用户操作里建、只给同源音频
+
+`src/lib/audio-effects.ts` 有三条不能违反的约束，违反了都是**声音没了**而不是报错：
+
+| 约束 | 违反的后果 |
+| --- | --- |
+| 一个 `<audio>` 只能 `createMediaElementSource()` 一次 | 第二次直接抛 `InvalidStateError` |
+| AudioContext 必须在**用户手势之后**创建/恢复 | 在 effect 里建会是 `suspended`，**接上就静音** |
+| 音频必须同源或带 CORS 头 | 外链（网易云之类）接进链里会**直接没声音** |
+
+所以：`applyAudioEffect()` 只在「点音效按钮」和「`play()` 成功之后」调用；
+外链曲目由 `isEffectAvailable()` 挡掉（界面上按钮是禁用的）；
+默认档位是「原声」，**不建任何 AudioContext**，原有播放行为不受影响。
 
 ---
 
@@ -255,17 +338,26 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | 浏览量/点赞/评论的后端 | `workers/blog-api/`（独立部署，改完要单独 `wrangler deploy`） |
 | 设置抽屉 | `src/components/SettingsPanel.tsx` |
 | 壁纸逻辑 | `src/lib/wallpaper.ts` + `WallpaperLayer/Settings.tsx` |
+| **资源目录约定**（图片/壁纸/音乐/歌词） | `src/lib/assets.ts` 的 `ASSET_DIRS` |
+| 歌单 / 播放模式 | `src/lib/music.ts` |
+| 歌词解析（LRC） | `src/lib/lyrics.ts`（纯函数，可以直接用 Node 验） |
+| 悬浮歌词窗 | `src/components/LyricsPanel.tsx`（挂到 `document.body`） |
+| 音效（Web Audio） | `src/lib/audio-effects.ts` |
 | 搜索结果排序 / 打分 | `src/lib/search.ts` + `SearchDialog.tsx` |
 | 文章元信息（字数等） | `src/lib/posts.ts` 的 `PostMeta` |
 | MDX 里能用的组件 | `src/mdx-components.tsx` |
+| **文章支持哪些扩展名** | `next.config.ts` 的 `extension` + `options.format` —— 见硬约束 12，**缺一不可** |
 | 代码块 / 公式样式 | `src/app/globals.css` 末尾两节 |
 | 部署相关 | `next.config.ts` / `Dockerfile` / `nginx.conf` / `public/_headers` |
+| 新建文章（本地写作入口） | `scripts/new-post.mjs`（`npm run new`） |
+| 面向写作的编辑器配置 | `.vscode/settings.json` + `.vscode/blog.code-snippets`（**只影响本地编辑体验，不参与构建**） |
+| 图片地址规整 | `src/lib/site.ts` 的 `resolveImageSrc()` —— 正文图 / 卡片缩略图 / 封面图**共用这一个** |
 
 ### 关键文件职责
 
 | 文件 | 职责 | 注意 |
 | --- | --- | --- |
-| `src/lib/posts.ts` | **构建期**内容层：解析、过滤、字数、目录、相关文章、搜索索引、正文配图 | 服务端专用 |
+| `src/lib/posts.ts` | **构建期**内容层：解析、过滤、字数、目录、相关文章、搜索索引、正文配图、文章文件名（`Post.fileName`） | 服务端专用 |
 | `src/lib/interactions.ts` | 互动层：本机存储、远程协议、path 规整、评论合并（**零 import，可直接用 Node 跑**） | 客户端安全 |
 | `src/lib/interactions-file.ts` | 构建期读 `content/guestbook.json` / `comments.json` | 服务端专用 |
 | `src/lib/repo-comments.ts` | 站长用 GitHub API 把留言/回复 upsert 进仓库 | 客户端专用 |
@@ -275,7 +367,10 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`。
 | `src/lib/tag-slug.ts` | 标签名 ⇄ URL slug（**纯函数，客户端安全**） | 中文标签要在这里登记 |
 | `src/lib/site-settings.ts` | 站点默认值的类型、校验、**防闪屏脚本生成** | 客户端安全 |
 | `src/lib/site-settings-file.ts` | 构建期读 JSON | 服务端专用 |
-| `src/lib/github-upload.ts` | 直连 GitHub API：传图、删图、读写设置文件 | 客户端专用 |
+| `src/lib/github-upload.ts` | 直连 GitHub API：传图、删图、读写设置文件（传图目录由 `AssetDir` 指定） | 客户端专用 |
+| `src/lib/assets.ts` | 资源目录约定：`ASSET_DIRS` / `assetUrl()` / `musicUrl()` / `lyricUrl()` | 零依赖，客户端安全 |
+| `src/lib/lyrics.ts` | LRC 解析与「当前唱到哪一句」（**纯函数，可直接用 Node 跑**） | 客户端安全 |
+| `src/lib/audio-effects.ts` | Web Audio 音效链：三段均衡 + 现场生成的混响 | 客户端专用，见硬约束 13 |
 | `src/hooks/usePersistentState.ts` | localStorage ⇄ React（`useSyncExternalStore`） | 见硬约束 5 |
 | `src/mdx-components.tsx` | MDX 全局组件映射 | Next 约定文件，签名不能改 |
 
@@ -375,7 +470,7 @@ ASCII 部分（`workers/blog-api` 这种）反而是好的，所以失败会一�
 里面是**序列化后的原始 props**。曾经这样验证「有封面时不该显示缩略图」：
 
 ```js
-html.includes("/uploads/zz-a.jpg")   // true —— 但页面上根本没显示它
+html.includes("/images/zz-a.jpg")   // true —— 但页面上根本没显示它
 ```
 
 因为那篇文章的 `post.images` 数组本身就包含 zz-a，props 被原样写进了 flight 数据。
@@ -390,6 +485,80 @@ const dom = (html) => html.slice(0, html.indexOf("self.__next_f"));
 所以 `花城 回复` 这种拼接出来的文案要写成 `/花城(<!-- -->)?\s*回复/` 才匹配得到。
 
 **教训**：产物验证要区分「数据在页面里」和「用户看得见」。
+
+### 10. `.md` 加进来时，JSX 被**静默丢掉**（构建成功、页面正常、内容变样）
+
+给 `.md` 加支持时，第一版只加了 `extension: /\.mdx?$/`。
+构建通过、页面生成了、文字也都在 —— **看起来完全成功**。
+
+直到做了一次对照实验（同一份内容，一份 `.md` 一份 `.mdx`）才发现：
+
+```text
+.md  ：A 表达式：{1 + 1}                 ← 没求值
+       B 单行组件：<!-- -->单行内容        ← <Callout> 标签整个消失
+
+.mdx ：A 表达式：2
+       B 单行组件：<div class="...">单行标题...单行内容</div>
+```
+
+根因是 `@mdx-js/mdx` 的 `format` 默认 `'detect'`，**按扩展名猜格式**：
+`.md` 落在 `mdExtensions` 里 → 按纯 Markdown 编译 → JSX 当原始 HTML 被丢掉
+（内容文字留着，所以肉眼看不出少了东西）。
+
+**教训**（这一条比 bug 本身重要）：
+**「支持一种新格式」不能靠「构建通过 + 页面能打开」来验收 ——
+必须拿同一份内容跑两种格式做对照。**
+只加 `extension` 的那版，如果没做对照实验，会以「看起来成功了」的样子进仓库。
+
+同类问题的通用检查法：**预期会出现的东西（组件外壳、特有 class、求值结果）
+在不在产物里**，而不是「页面能不能打开」。
+
+### 11. 动态 `import()` 的上下文**不能为空**
+
+同一个功能里的第二个坑。文章页一度写成按扩展名分两个分支：
+
+```ts
+post.fileName.endsWith(".md")
+  ? import(`@/content/posts/${slug}.md`)     // 仓库里一篇 .md 都没有时
+  : import(`@/content/posts/${slug}.mdx`)    // → 整个构建失败
+```
+
+```text
+Module not found: Can't resolve '@/content/posts/' <dynamic> '.md'
+```
+
+Turbopack 为每个模板字面量生成一个「上下文模块」（把匹配到的一批文件一起打包），
+**匹配不到任何文件就报错**。于是那条写法凭空造出一条隐式硬约束：
+「仓库里必须至少留一篇 `.md` 文章」—— 而报错信息里完全看不出这层因果。
+
+**写法**：一个插值 + 含扩展名的真实文件名。
+
+```ts
+await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
+```
+
+**教训**：`import()` 里插值的**每一段静止部分都会被当成 glob**。
+新增任何「按后缀/类型分支」的动态 import 时，都要想一遍
+「这个分支匹配不到文件会怎样」—— 它不会静默跳过，而是让整个构建挂掉。
+
+### 12. `position: fixed` 的浮层，只要祖先有 `backdrop-blur` / `transform` 就会被「关进」那个祖先
+
+歌词窗（`LyricsPanel`）第一版是就地 `fixed` 渲染在侧栏里的，结果：
+
+- 有壁纸时侧栏带 `backdrop-blur-xl`，移动端抽屉带 `translate-x-*` ——
+  **这两个都会给 fixed 子元素创建包含块**，于是「贴着视口右下角」变成了
+  「贴着侧栏右下角」，还被侧栏的 `overflow-hidden` 裁掉一截。
+
+**做法**：用 `createPortal(…, document.body)` 挂出去。
+
+顺带两个同源的小坑：
+
+- 侧栏内容区是 `overflow-y-auto`（按 CSS 规范 `overflow-x` 会跟着变成 `auto`），
+  所以**就地展开的浮层菜单也会被裁**。播放列表、音效列表都做成**就地展开**而不是浮层，
+  正是因为这个 —— 别顺手改成 absolute 浮层。
+- 浮层的位置**用 `right` / `bottom` 存**而不是 `left` / `top`：
+  默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
+  也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
 
 ---
 
@@ -426,7 +595,7 @@ draft: false
 | --- | --- |
 | `<Callout type="tip" title="…">…</Callout>` | 提示框，type 可为 info/tip/warning/danger |
 | `<BilibiliVideo bvid="BV…" title="…" />` | B 站视频 |
-| `<AudioPlayer src="/uploads/x.mp3" title="…" />` | 单曲播放器 |
+| `<AudioPlayer src="/music/x.mp3" title="…" />` | 单曲播放器 |
 
 新增全局组件就在那个文件的 `components` 对象里加一行。
 
@@ -434,8 +603,8 @@ draft: false
 
 | 想要的效果 | 怎么写 |
 | --- | --- |
-| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /uploads/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
-| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/uploads/a.jpg)` 或 `<img src="/uploads/a.jpg" />` |
+| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /images/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
+| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/images/a.jpg)` 或 `<img src="/images/a.jpg" />` |
 
 `extractImages()` 会自动跳过代码块/行内代码里的图片、`data:` 内联图和相对路径，
 最多取 4 张。**有 `cover` 时不再显示缩略图带**（有意的，见硬约束 11）。
@@ -542,7 +711,9 @@ NEXT_PUBLIC_BASE_PATH=/hua-cheng-blog npx next build
 视频 / 音乐 · **自定义壁纸（含直传仓库）** · **站点默认值存仓库** ·
 深浅色主题 · **头像** · **列表页封面图与正文缩略图** ·
 **浏览量 / 点赞**（本机 / 全站两档） · **评论区（三条通道）** ·
-**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）**
+**留言与评论的站长回复**（服务端强制「只有站长能回复」） · **Giscus 接入（默认未启用）** ·
+**资源按类型分目录**（图片 / 壁纸 / 音乐 / 歌词） · **悬浮歌词窗（可拖动缩放）** ·
+**Web Audio 音效（免费，默认关闭）**
 
 ### 明确没做（以及原因）
 
