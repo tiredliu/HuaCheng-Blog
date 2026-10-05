@@ -367,6 +367,7 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
             frosted={wallpaperActive}
             repoMessages={repoMessages}
             settings={defaults.interactions}
+            giscus={defaults.giscus}
           />
         </div>
       </div>

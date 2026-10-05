@@ -12,6 +12,12 @@ export interface GiscusCommentsProps {
   embedded?: boolean;
   heading?: string;
   hint?: string;
+  /** 是否渲染自带的小标题。留言板面板头部已有标题，可关掉避免重复 */
+  showHeading?: boolean;
+  /** 覆盖 config.mapping —— 留言板用 "specific" 绑定到一个固定讨论 */
+  mapping?: GiscusConfig["mapping"];
+  /** mapping="specific" 时对应的讨论标题（giscus 会按它查找 / 创建 discussion） */
+  term?: string;
 }
 
 const GISCUS_SCRIPT = "https://giscus.app/client.js";
@@ -27,8 +33,9 @@ const ORIGIN = "https://giscus.app";
  *
  * 代价：评论者需要有 GitHub 账号。
  *
- * 配置写在 `content/site-settings.json` 的 `giscus` 字段里，
- * 没有配置就不渲染 —— 此时右侧留言板是本机留言，两者可以并存。
+ * 配置写在 `content/site-settings.json` 的 `giscus` 字段里：
+ * 文章底部与右侧留言板都用它渲染（留言板传 `mapping="specific"` + `term`
+ * 绑定到一条固定的 GitHub Discussion），没有配置就不渲染 —— 那时文章底部退回本机评论。
  */
 export function GiscusComments({
   config,
@@ -36,8 +43,14 @@ export function GiscusComments({
   embedded = false,
   heading = "评论",
   hint = "评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，可以随时导出。",
+  showHeading = true,
+  mapping,
+  term,
 }: GiscusCommentsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 留言板会传 mapping="specific" 覆盖文章用的 pathname 映射
+  const effectiveMapping = mapping ?? config?.mapping ?? "pathname";
 
   useEffect(() => {
     const container = containerRef.current;
@@ -54,7 +67,10 @@ export function GiscusComments({
     script.setAttribute("data-repo-id", config.repoId);
     script.setAttribute("data-category", config.category);
     script.setAttribute("data-category-id", config.categoryId);
-    script.setAttribute("data-mapping", config.mapping ?? "pathname");
+    script.setAttribute("data-mapping", effectiveMapping);
+    if (effectiveMapping === "specific" && term) {
+      script.setAttribute("data-term", term);
+    }
     script.setAttribute("data-strict", "1");
     script.setAttribute("data-reactions-enabled", config.reactionsEnabled === false ? "0" : "1");
     script.setAttribute("data-emit-metadata", "0");
@@ -70,7 +86,7 @@ export function GiscusComments({
     };
     // 主题变化不应该重建 iframe，交给下面那个 effect 用 postMessage 同步
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+  }, [config, effectiveMapping, term]);
 
   // 主题切换时通过 postMessage 通知 iframe，避免整块重新加载
   useEffect(() => {
@@ -90,10 +106,12 @@ export function GiscusComments({
         embedded ? "" : "mt-12 border-t border-stone-200 pt-8 dark:border-stone-800"
       }
     >
-      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide text-stone-500 uppercase dark:text-stone-400">
-        <MessageSquare className="h-4 w-4 text-brand-500" />
-        {heading}
-      </h2>
+      {showHeading && (
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold tracking-wide text-stone-500 uppercase dark:text-stone-400">
+          <MessageSquare className="h-4 w-4 text-brand-500" />
+          {heading}
+        </h2>
+      )}
       <div ref={containerRef} className="min-h-[120px]" />
       <p className="mt-3 text-[11px] leading-relaxed text-stone-400">{hint}</p>
     </section>

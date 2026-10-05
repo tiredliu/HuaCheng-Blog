@@ -18,29 +18,48 @@ import type { GiscusConfig } from "@/lib/site-settings";
 
 export interface PostInteractionsProps {
   slug: string;
-  /** 构建期从 `content/comments.json` 读到的公开评论（含站长回复） */
+  /** 构建期从 `content/comments.json` 读到的公开评论（含站长回复），仅本机评论模式用 */
   repoComments: CommentItem[];
-  /** 站点设置里的互动后端配置 */
+  /** 站点设置里的互动后端配置，仅本机评论模式用 */
   settings: InteractionSettings;
-  /** 配置了 Giscus 才有：作为「用 GitHub 账号公开评论」的额外通道 */
+  /** 配置了 Giscus（本站默认已配）时，文章底部只渲染这一条评论区 */
   giscus: GiscusConfig | null;
 }
 
 /**
  * 文章底部的评论区。
  *
- * 三种评论通道并存，各自解决不同的问题：
+ * 只走**一条**通道，不再同时出现两个评论框：
  *
- * | 通道 | 需要什么 | 谁看得见 | 站长怎么回复 |
- * | --- | --- | --- | --- |
- * | 本机评论 | 什么都不用 | 只有自己 | 看不到，也就回不了（这是纯静态站的硬边界） |
- * | 互动服务（Cloudflare Worker） | 部署一次 Worker | 所有人 | 页面上直接回复，服务端校验站长身份 |
- * | Giscus（GitHub Discussions） | 配置 giscus 字段 | 所有人 | 直接在 GitHub Discussions 里回复 |
- *
- * 「回复只有站长能做」在三条通道上都是强制的，而不是靠隐藏按钮。
+ * - **配了 Giscus（本站默认）** → 只渲染 GitHub Discussions 评论区，
+ *   访客用 GitHub 账号评论，站长在仓库的 Discussions 里回复。
+ * - **没配 Giscus** → 退回「零配置可用」的本机评论（复制这个项目的人无需任何设置），
+ *   保持这个模板开箱即用的底线。
  */
 export function PostInteractions({ slug, repoComments, settings, giscus }: PostInteractionsProps) {
   const { isDark } = useThemeState();
+
+  if (giscus) {
+    return (
+      <GiscusComments
+        config={giscus}
+        isDark={isDark}
+        heading="评论"
+        hint="评论由 GitHub Discussions 提供，需要登录 GitHub 账号；数据保存在仓库的 Discussions 里，站长会在那里回复，也可以随时导出。"
+      />
+    );
+  }
+
+  return <LocalComments slug={slug} repoComments={repoComments} settings={settings} />;
+}
+
+/**
+ * 本机评论模式（仅在没配 Giscus 时使用）。
+ *
+ * 访客写下的评论只存在自己的浏览器里；站长配了 GitHub Token 后可以把
+ * 评论与回复提交进 `content/comments.json`，重新构建后对所有访客可见。
+ */
+function LocalComments({ slug, repoComments, settings }: Omit<PostInteractionsProps, "giscus">) {
   const pathKey = toPathKey(slug);
 
   const [name, setName] = usePersistentState<string>("hc-blog:visitor-name", "", isString);
@@ -87,20 +106,7 @@ export function PostInteractions({ slug, repoComments, settings, giscus }: PostI
         emptyHint="还没有评论，来写第一条吧。"
       />
 
-      {/* Giscus 是可选的第二条通道：走 GitHub 账号，站长在 Discussions 里回复 */}
-      {giscus && (
-        <div className="mt-8">
-          <GiscusComments
-            config={giscus}
-            isDark={isDark}
-            embedded
-            heading="用 GitHub 账号公开评论"
-            hint="这条通道由 GitHub Discussions 提供，需要登录 GitHub 账号；站长在仓库的 Discussions 里直接回复。"
-          />
-        </div>
-      )}
-
-      {!giscus && !thread.remoteReady && (
+      {!thread.remoteReady && (
         <p className="mt-4 rounded-xl border border-dashed border-stone-300 px-3 py-2.5 text-[11px] leading-relaxed text-stone-400 dark:border-stone-700">
           想要「所有访客都看得见、站长能回复」的评论区，两条路选一条：部署仓库里自带的互动服务
           （<code>workers/blog-api</code>，见 README），或者配置 Giscus。
