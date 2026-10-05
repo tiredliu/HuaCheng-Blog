@@ -15,13 +15,20 @@
 
 ### 方案 A：全在 Dashboard 里点（不用装 wrangler，推荐）
 
-① **建库**：Cloudflare Dashboard → **Workers & Pages → D1 → Create**，
+① **建库**：Cloudflare Dashboard 侧边栏 → **存储和数据库 → D1 SQL 数据库** → **创建数据库**，
 名字填 `hc-blog-views`（随便取也行，绑定时选对即可）。
 
-② **绑定**：打开你的 **Pages 项目 → Settings → Functions → D1 database bindings → Add binding**：
+> 控制台改过版，入口位置也挪过，所以对不上别慌：
+> 新版是「**存储和数据库 → D1 SQL 数据库**」，部分账号仍显示成「**Workers & Pages → D1**」。
+> 两个都找不到时，直接用页面顶部的**搜索框搜 `D1`**，能直达创建页。
 
-- **Variable name**：`BLOG_DB`（必须一字不差，代码里写死了这个名字）
-- **D1 database**：选刚创建的 `hc-blog-views`
+② **绑定**：打开你的 **Pages 项目 → 设置 → 绑定（Bindings）→ 添加 → D1 数据库**：
+
+- **变量名称 / Variable name**：`BLOG_DB`（必须一字不差，代码里写死了这个名字）
+- **D1 数据库**：选刚创建的 `hc-blog-views`
+
+> 旧版控制台这一步在「Settings → Functions → D1 database bindings」，
+> 名字不同但填的东西一样：变量名 `BLOG_DB` + 选库。
 
 ③ **重新部署**：往 `main` 推一次（或在该项目的 Deployments 里点 “Retry deployment”）。
 
