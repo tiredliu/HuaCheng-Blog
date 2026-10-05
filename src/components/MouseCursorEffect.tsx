@@ -439,9 +439,30 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       playKey();
     };
 
+    /**
+     * 连点同一处时，浏览器会把它当成「双击选词 / 三击选段」；
+     * 选中之后 Edge（以及部分 Chromium 系）会弹出**原生的「选中迷你菜单」**。
+     * 那个菜单是系统浮层，弹出期间页面收不到 `pointermove` ——
+     * 于是自定义光标「停在原地，等菜单消失后瞬移到新位置」。
+     *
+     * 这里把「第 2 次及以后」按下的默认行为拦掉（并顺手清掉已经产生的选区）。
+     * 单击、以及按住拖拽选择文字都照常可用；只在输入框里放行，
+     * 免得「双击选中一个词」这种正常操作被影响。
+     */
+    const suppressMultiClickSelection = (e: MouseEvent) => {
+      if (e.detail < 2) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) selection.removeAllRanges();
+    };
+
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerdown", onDown, { passive: true });
     window.addEventListener("keydown", onKey, { passive: true });
+    window.addEventListener("mousedown", suppressMultiClickSelection, true);
 
     /* ---------------- 绘制 ---------------- */
     /** 画六芒星光标：持续旋转 + 每条边错相位地消失/重绘 */
@@ -610,6 +631,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", suppressMultiClickSelection, true);
       observer.disconnect();
       root.removeAttribute("data-cursor-fx");
       if (audio) void audio.close().catch(() => {});
