@@ -273,13 +273,62 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     let lastKeyAt = 0;
     let lastBurstAt = 0;
     /**
-     * 指针是否已经离开顶层文档（进入 iframe —— 例如 Giscus 评论框 —— 或移出窗口）。
+     * 指针是否已经离开顶层文档（进入 iframe —— 例如 Giscus 评论框、B 站视频 ——
+     * 或移出窗口）。
      *
-     * iframe 是**独立文档**：指针移进去后顶层窗口收不到 `pointermove`，
-     * 自定义光标就会「冻」在 iframe 边界外不动（而 iframe 内部显示的是原生光标）。
-     * 检测到离开就整帧清空、不画光标，避免留下卡住的残影。
+     * iframe 是**独立文档**：指针移进去之后顶层窗口收不到 `pointermove`，
+     * 自定义光标会「冻」在 iframe 边界外不动（而 iframe 里显示的是系统光标）。
+     * 所以一旦判定进入 iframe，就把整层清空、停止绘制，**把光标交还给系统**。
      */
     let pointerOutside = false;
+    /** 「已进入 iframe」状态下是否已经清过屏：清一次就够，不必每帧重复 clearRect */
+    let outsideCleared = false;
+    /** 是否收到过真实的 pointermove（没有的话，指针坐标还是初始的视口中心，不能拿它做几何判定） */
+    let pointerSeen = false;
+
+    /**
+     * 判断一个节点是不是 iframe。
+     *
+     * ⚠️ **不能用 `instanceof`**：指针移进/移出 iframe 时浏览器给的 `relatedTarget`
+     * 可能来自 iframe 的**另一个 realm**（跨文档节点在本窗口里 instanceof 判定为 false），
+     * 也可能直接是 null。这里只认 `tagName`，并且把「连属性都读不出来」的跨域节点
+     * 一律当成 iframe —— 读不到属性的节点本来就只可能来自别的文档。
+     */
+    const isIframe = (node: unknown): boolean => {
+      if (!node) return false;
+      try {
+        return (node as Element).tagName === "IFRAME";
+      } catch {
+        return true;
+      }
+    };
+
+    /**
+     * 几何兜底：坐标是否落在某个 iframe 的矩形里。
+     * 部分浏览器在「刚进入 iframe」那一刻会把事件 target 报成外层容器，
+     * 只看 tagName 会漏判 —— 再用矩形确认一次（页面上 iframe 通常只有一两个，开销可忽略）。
+     */
+    const pointInIframe = (x: number, y: number): boolean => {
+      const list = document.querySelectorAll("iframe");
+      for (let i = 0; i < list.length; i += 1) {
+        const r = list[i].getBoundingClientRect();
+        if (
+          r.width > 0 &&
+          r.height > 0 &&
+          x >= r.left &&
+          x <= r.right &&
+          y >= r.top &&
+          y <= r.bottom
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    /** 指针此刻是否压在 iframe 上（视频播放器、评论框都是跨域 iframe） */
+    const overIframe = (target: EventTarget | null, x: number, y: number): boolean =>
+      isIframe(target) || pointInIframe(x, y);
 
     /** 从锚点向目标点走，每隔 STAMP_SPACING 放一个印记，保证拖尾连续 */
     const addStamps = (toX: number, toY: number) => {
@@ -398,32 +447,51 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     /* ---------------- 事件 ---------------- */
     const onMove = (e: PointerEvent) => {
+      // 指针压在 iframe 上（视频、评论区）：立刻隐藏特效，光标交还系统。
+      // 这一步必须「一次到位」—— 命中 iframe 之后顶层文档就收不到 pointermove 了。
+      if (overIframe(e.target, e.clientX, e.clientY)) {
+        pointerOutside = true;
+        pointerSeen = true;
+        return;
+      }
       pointerOutside = false;
+      pointerSeen = true;
       pointer.x = e.clientX;
       pointer.y = e.clientY;
       addStamps(e.clientX, e.clientY);
     };
 
     /**
-     * 指针离开顶层文档：`relatedTarget` 为 null（进了 iframe，或移出了窗口），
-     * 或者直接落在 iframe 元素上（部分浏览器的行为）。
+     * 指针离开顶层文档：`relatedTarget` 为 null（进了 iframe / 移出窗口），
+     * 或者直接就是 iframe（部分浏览器的行为）。
      */
     const onPointerOut = (e: PointerEvent) => {
       const related = e.relatedTarget as Node | null;
-      if (related === null || (related instanceof HTMLElement && related.tagName === "IFRAME")) {
-        pointerOutside = true;
-      }
+      if (related === null || isIframe(related)) pointerOutside = true;
     };
 
     /**
-     * ⚠️ 指针落到 iframe 上时，浏览器在 `pointerout` 之后**还会补一个 `pointerover`**
-     * （target 就是这个 iframe）。如果无脑复位，就会把刚设好的「已离开」立刻撤销 ——
-     * 表现就是「光标进了评论区却还冻在 iframe 外面」。所以这里要放过 iframe 目标。
+     * ⚠️ 指针压到 iframe 上时，要**主动把状态置为「已离开」**，
+     * 而不是「判到 iframe 就放过不管」。
+     *
+     * 早先那种写法会在这样的顺序下失灵：进入 iframe 的瞬间浏览器先派发一次
+     * target 是**外层容器**的 `pointerover`（那一刻坐标已经在 iframe 里了），
+     * 于是状态被复位成「还在文档内」；紧接着浏览器把后续事件全部交给 iframe，
+     * 顶层再也收不到任何事件 —— 表现就是「系统光标已经进了 iframe，
+     * 自定义光标却冻在边界外一动不动」。
      */
     const onPointerOver = (e: PointerEvent) => {
-      const target = e.target as Node | null;
-      if (target instanceof HTMLElement && target.tagName === "IFRAME") return;
-      pointerOutside = false;
+      pointerOutside = overIframe(e.target, e.clientX, e.clientY);
+    };
+
+    /**
+     * 滚动不产生 `pointermove`，但会把 iframe 挪到指针底下（或从指针底下挪走），
+     * 所以滚动后要按「指针当前所在位置」重新判定一次。
+     * 没收到过真实移动时坐标是初始的视口中心，不能拿来做判定。
+     */
+    const onScroll = () => {
+      if (!pointerSeen) return;
+      pointerOutside = overIframe(document.elementFromPoint(pointer.x, pointer.y), pointer.x, pointer.y);
     };
 
     const onDown = (e: PointerEvent) => {
@@ -496,6 +564,8 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     window.addEventListener("mousedown", suppressMultiClickSelection, true);
     document.addEventListener("pointerout", onPointerOut, { passive: true });
     document.addEventListener("pointerover", onPointerOver, { passive: true });
+    // 滚动事件不冒泡，用捕获阶段才收得到外壳里那个滚动容器
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
 
     /* ---------------- 绘制 ---------------- */
     /** 画六芒星光标：持续旋转 + 每条边错相位地消失/重绘 */
@@ -634,15 +704,20 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       // rAF 回调的时间戳是「帧开始」时刻，可能早于事件发生时刻，
       // 两者混用会让 age 变成负数 —— 涟漪半径算出负值，arc 直接抛错。
       const now = performance.now();
-      ctx.clearRect(0, 0, vw, vh);
 
-      // 指针进了 iframe / 出了窗口：拿不到 pointermove，直接不画，
-      // 免得没有跟随的光标「冻」在 iframe 边界外
+      // 指针进了 iframe / 出了窗口：拿不到 pointermove，整层清空停止绘制，
+      // 免得没有跟随的光标「冻」在 iframe 边界外（清一次就够，不必每帧重来）
       if (pointerOutside) {
+        if (!outsideCleared) {
+          ctx.clearRect(0, 0, vw, vh);
+          outsideCleared = true;
+        }
         raf = requestAnimationFrame(draw);
         return;
       }
+      outsideCleared = false;
 
+      ctx.clearRect(0, 0, vw, vh);
       drawReveal(now);
 
       // 点击涟漪（与光标同色）
@@ -674,6 +749,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       window.removeEventListener("mousedown", suppressMultiClickSelection, true);
       document.removeEventListener("pointerout", onPointerOut);
       document.removeEventListener("pointerover", onPointerOver);
+      document.removeEventListener("scroll", onScroll, { capture: true });
       observer.disconnect();
       root.removeAttribute("data-cursor-fx");
       if (audio) void audio.close().catch(() => {});
