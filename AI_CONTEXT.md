@@ -589,6 +589,24 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
   默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
   也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
 
+### 13. 自定义光标：`pointerout` 的 `relatedTarget === null` ≠「进了 iframe」
+
+`MouseCursorEffect` 用 `pointerOutside` 决定「是否把光标交还系统」：为 `true` 时整层清空停画，
+而全局 CSS 又设了 `html[data-cursor-fx="on"] * { cursor: none }` —— 所以**一旦误判成 true，
+屏幕上会一个光标都不剩**（自绘的停画、系统的被藏着）。
+
+浏览器给 `relatedTarget === null` 的场景**不止「进入跨域 iframe」**：
+移出窗口、以及**原生浮层盖住指针**时（最典型是 Edge 的「选中迷你菜单」）都会给 null。
+曾经把 null 一律当 out，结果**在正文里连点几次**（触发双击选词 → 弹出该迷你菜单）光标就消失了，
+而且**原地点击不产生 move/over，无法自愈**，只能移动鼠标或刷新才回来。
+VSCode 的 webview 没有这个原生浮层，所以**在 VSCode 里复现不出来**。
+
+**做法**：只用**几何**判定是否「真的在 iframe 上」——
+`isIframe(relatedTarget) || pointInIframe(e.clientX, e.clientY)`；
+null 且坐标落在正文上时**不隐藏**。再在 `pointerdown` 里据当前坐标重算一次，让误判能立刻自愈。
+另外把整套绘制包进 `try/finally` 且**无条件续帧**：某帧偶发抛错也不会断掉 rAF 链，
+不会因「不重绘 + `cursor:none`」让光标永久消失。
+
 ---
 
 ## 七、常见改动的标准做法
