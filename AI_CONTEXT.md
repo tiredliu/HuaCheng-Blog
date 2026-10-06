@@ -589,33 +589,45 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
   默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
   也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
 
-### 13. 自定义光标：别用 `relatedTarget === null` 判断「离开了页面」
+### 13. 自定义光标：真正的坑是「浏览器不再给我们坐标」，不是 `relatedTarget`
 
 `MouseCursorEffect` 用 `pointerOutside` 决定「是否把光标交还系统」：为 `true` 时整层清空停画，
-而全局 CSS 又设了 `html[data-cursor-fx="on"] * { cursor: none }` —— 所以**一旦误判成 true，
-屏幕上会一个光标都不剩**（自绘的停画、系统的被藏着），且未必能自愈。
+而全局 CSS 又设了 `html[data-cursor-fx="on"] * { cursor: none }` —— 所以判定一旦不对，
+**屏幕上可能一个光标都不剩**（自绘的停画/冻住、系统的又被藏着）。这个模块前后改了三次，别再回头。
 
-**踩过的坑（前后踩了两次，别再回头）**：曾经把 `pointerout` 的 `relatedTarget === null`
-一律当成「离开页面」。但浏览器给 null 的场景**远不止离开**：指针下的元素刚被替换掉
-（客户端换页、列表重排）、以及**原生浮层盖住指针**时（最典型是 Edge 的「选中迷你菜单」）
-也会给 null。于是在**正文里连点几次**、或**来回快速切换导航页**时，光标会莫名其妙消失；
-而「原地点击 / 鼠标停着不动」不产生 move/over，就**没有事件能把它纠正回来**。
-VSCode 的 webview 没有这个原生浮层、也不会那样换页，所以**在 VSCode 里复现不出来**。
+**根因（从录屏逐帧分析定位出来的）**：自绘光标的坐标**只来自 `pointermove`**。而浏览器
+在下面这些情况下**根本不派发 `pointermove`**：
 
-**现在的做法**：
+1. **按下的同时手抖 → 触发原生拖拽**（`dragstart` → `pointercancel`，之后只有 `drag`）。
+   快速连点导航链接时非常容易触发，实测只要按下后移动几像素就会发生。
+   此时自绘冻在最后位置不动，而 `cursor: none` 又把系统光标藏了 ⇒ 鼠标处一个光标都没有。
+   **VSCode 的 webview 不会这样触发拖拽，所以「在 VSCode 里无法复现」。**
+2. **指针移到浏览器自己的界面上**（工具栏/书签栏、地址栏）或别的窗口 ⇒ 页面收不到任何事件。
+3. 指针进入 iframe（独立文档）。
 
-- **只做几何判定**（`shouldHide`）：坐标**出了视口**（进了 DevTools 停靠区 / 出了窗口），
-  或**压在 iframe 上**（`isIframe(target)` 或 `pointInIframe(x, y)` 矩形命中）才算「离开」。
-  `pointerout` 只保留「一步跨进 iframe」这一种用途（那里 `relatedTarget` 就是 iframe）。
-  正文上收到 null **不再隐藏**。
-- **200ms 心跳复算**（在 `draw` 里按当前坐标重新判定一次）：不管什么原因被误置成「收起」，
-  只要坐标确实落在页面上，最多一两百毫秒就自己恢复，**不需要用户动鼠标**。
-  `resize` 时也立即复算一次（视口变了，坐标可能已经落在视口外）。**这是防「光标卡死」的底线，别删。**
+**做法**（三条一起才成立）：
+
+- **几何判定**（`shouldHide`）：坐标**出了视口**或**压在 iframe 上**（`isIframe(target)` /
+  `pointInIframe(x, y)` 矩形命中）才收起。这部分「可以被事件/心跳纠正」。
+- **`untracked`（指针已不受页面跟踪）**：由 `pointercancel`、`dragstart`、以及
+  `pointerout` 的 `relatedTarget === null` 置位；**只能由真实的 `pointermove` / `pointerdown`
+  （或从页面内另一个元素移过来的 `pointerover`）解除**。这是「拖拽/移出页面」的正解，
+  也是为什么不能在 `pointerout(null)` 上立刻收起又立刻放开。
+- ⚠️ **`relatedTarget === null` 必须「延迟确认」**（`LEAVE_CONFIRM = 160ms`）：指针下的元素
+  被替换（换页、列表重排）时浏览器**同样给 null**，但紧接着就会有 `pointerover`/`pointermove`
+  —— 那就把定时器撤掉；真的移出去则一条事件都不会再来。
+  历史教训：**一律当「离开」**→ 换页时误判 → 一个光标都不剩；**完全不信 null** → 拖拽时冻在旧位置。
+  两种都错，正解是「延迟确认 + 事件可撤销」。
+- **200ms 心跳复算**（`draw` 里按当前坐标重判）只负责清**几何层面**的误判，**绝不清 `untracked`**
+  —— 否则「指针在浏览器界面上」又会被误恢复成「冻在页面里的光标」。
 - **指针位置存在模块级 `lastPointer`**，不放 effect 内：effect 依赖 `[color, codeColor]`，
   在设置里改一次光标颜色就会重跑；若位置只在 effect 内初始化，光标会被重置到**视口中心**。
 - `drawReveal` 里的 `clip` / `destination-in` 包进 `try/finally`：`drawImage` 一旦抛错，
   `restore()` 会被跳过，clip 与混合模式将**永久**留在上下文里，画布从此永远是空的。
 - 整套绘制同样包在 `try/finally` 里**无条件续帧**：某帧抛错也不会断掉 rAF 链。
+- 调试提示：验证这类东西要用 CDP + **`--headless=new`**（headful 会被真实系统光标污染）；
+  判断「光标画在哪」要用**全部非透明像素的质心**并等 1.2s 让拖尾淡出（拖尾会把质心拉向路径中点）；
+  复现原生拖拽用 `Input.dispatchMouseEvent` 的 `mousePressed` + 若干 `mouseMoved`（`buttons: 1`）。
 
 
 ---

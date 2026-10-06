@@ -47,6 +47,15 @@ const KEY_THROTTLE = 28; // ms，按键音最小间隔
 const NOTE_THROTTLE = 80; // ms，连点时的钢琴音最小间隔（别把音频节点堆爆）
 const BURST_THROTTLE = 140; // ms，连点时限制「揭开一片」的频率，避免堆积
 const MASK_SCALE = 0.5; // 遮罩画布相对视口的分辨率（软边，半分辨率足够且更省）
+/**
+ * ms。「指针可能已经离开页面」（`pointerout` 的 `relatedTarget` 为 null）之后，
+ * 等这么久仍没有任何指针事件，才确认「真的离开了」并收起自绘。
+ *
+ * ⚠️ 必须延迟一拍：指针下的元素被替换掉（换页、列表重排）时浏览器**同样**给 null，
+ * 但那种情况紧跟着就会有 `pointerover` / `pointermove`；而真的移出去（到浏览器工具栏、
+ * 别的窗口）则一条事件都不会再来。
+ */
+const LEAVE_CONFIRM = 160;
 
 // 被「拨开」露出的代码内容（伪代码，仅作视觉纹理）
 const CODE_LINES = [
@@ -291,20 +300,29 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     /**
      * 是否要把自绘光标「收起来、交还给系统」。
      *
-     * 只在两种**几何上确凿**的情况下为 true：
-     *  - 指针压在一个 iframe 上（Giscus 评论框、B 站视频等）：iframe 是独立文档，
-     *    顶层窗口收不到后续 `pointermove`，自绘若不收起来就会「冻」在边界外；
-     *  - 指针坐标已经不在页面视口内（进了 DevTools 停靠区、出了窗口）：
-     *    这时系统光标在那些区域本来就可见。
+     * 两种情况：
+     *  ① **指针已不再被页面跟踪**（`untracked`，见下）：浏览器**不再派发 `pointermove`**，
+     *     自绘拿不到新坐标，只能冻在最后位置；而全局 CSS 又设了 `cursor: none` ——
+     *     于是屏幕上一个光标都不剩（鼠标处没有光标、自绘停在别处）。必须收起、交还系统。
+     *  ② **几何上确凿**：坐标落在 iframe 上、或已经不在页面视口内。
      *
-     * ⚠️ **刻意不看 `pointerout` 的 `relatedTarget === null`**。浏览器给 null 的场景
-     * 远不止「离开页面」：指针下的元素被替换掉（导航换页、列表重排）时也会给 null。
-     * 早先版本拿它当「已离开」，于是快速切换页面时偶尔会被误判成离开 —— 自绘停画、
-     * 而 CSS 又设了 `cursor: none`，屏幕上**一个光标都不剩**。
+     * ⚠️ 判定要坚持「能被事件纠正」：任何一次真实的 `pointermove` / `pointerdown`
+     * 都会清掉 ①，所以收起只是**临时**的，指针一回到页面立刻恢复自绘。
      */
     let pointerOutside = false;
-    /** 「已离开」状态下是否已经清过屏：清一次就够，不必每帧重复 clearRect */
+    /** 「已收起」状态下是否已经清过屏：清一次就够，不必每帧重复 clearRect */
     let outsideCleared = false;
+    /**
+     * 指针是否已「不再受页面跟踪」。
+     *
+     * ⚠️ 这是「光标和鼠标一起消失」的**根因**：在链接上**按下时手抖**（快速连点很常见）
+     * 会触发浏览器的**原生拖拽**（`dragstart` → `pointercancel`），此后浏览器只发 `drag`
+     * 事件、**不再发 `pointermove`**；指针移到浏览器工具栏 / 别的窗口也一样收不到事件。
+     * 这两种情况下自绘都拿不到坐标，只能收起（系统光标在那些区域本来就可见）。
+     */
+    let untracked = false;
+    /** 「可能离开页面」的确认定时器（见 `LEAVE_CONFIRM`） */
+    let untrackTimer = 0;
     /** 是否收到过真实的指针事件（没有的话，坐标还是初始值，不能拿它做几何判定） */
     let pointerSeen = lastPointer.seen;
 
@@ -374,20 +392,48 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     };
 
     /**
-     * 按**当前坐标**重新判定一次「是否收起」。
+     * 页面重新拿到指针事件了 => 恢复跟踪，并撤掉「可能已离开」的待确认定时器。
+     * ⚠️ 只有 `pointermove` / `pointerdown`、以及「从页面内另一个元素移过来」的
+     * `pointerover` 才算数 —— 拖拽结束、从窗口外回到页面时浏览器补发的那条
+     * `pointerover`（`relatedTarget` 为 null、坐标还是旧值）不能当作「回来了」，
+     * 否则会立刻在旧位置画出一个「冻住的」光标。
+     */
+    const markTracking = () => {
+      if (untrackTimer) {
+        clearTimeout(untrackTimer);
+        untrackTimer = 0;
+      }
+      untracked = false;
+    };
+
+    /**
+     * 「指针可能已经离开页面」（`relatedTarget` 为 null）。
+     * 延迟 `LEAVE_CONFIRM` 再确认：元素被替换导致的 null 紧接着会有事件到达，
+     * 那时 `markTracking()` 会把定时器撤掉；真的移出去则一条事件都不会再来。
+     */
+    const scheduleUntrack = () => {
+      if (untrackTimer) clearTimeout(untrackTimer);
+      untrackTimer = window.setTimeout(() => {
+        untrackTimer = 0;
+        untracked = true;
+      }, LEAVE_CONFIRM);
+    };
+
+    /**
+     * 按**当前坐标**重新判定一次几何层面「是否收起」。
      *
-     * 事件之外也会被周期性调用（见 `draw` 里的心跳）：因为「收起」一旦被误置，
+     * 事件之外也会被周期性调用（见 `draw` 里的心跳）：因为几何层面的收起一旦被误置，
      * 若之后恰好没有指针事件（原地点击、鼠标停着不动、换页时元素被替换……），
-     * 就永远等不到一条能纠正它的事件 —— 屏幕上一个光标都没有，只能刷新页面。
-     * 周期性复算把这种「卡死」压缩到最多一两百毫秒，且完全不依赖用户操作。
+     * 就永远等不到一条能纠正它的事件 —— 屏幕上一个光标都没有。
+     *
+     * ⚠️ 它**只清几何层面的判断，绝不清 `untracked`**：后者代表「浏览器不再给我们
+     * 坐标」（拖拽中 / 指针在浏览器界面上），只能由真实的指针事件来解除。
      */
     const revalidate = () => {
       if (!pointerSeen) return;
-      pointerOutside = shouldHide(
-        document.elementFromPoint(pointer.x, pointer.y),
-        pointer.x,
-        pointer.y,
-      );
+      pointerOutside =
+        untracked ||
+        shouldHide(document.elementFromPoint(pointer.x, pointer.y), pointer.x, pointer.y);
     };
     revalidate(); // 恢复上次位置后先按「当前视口」判定一次（视口可能已经变了）
     // 视口尺寸变化（DevTools 开合、窗口缩放）后立刻重算：坐标可能已经落到视口外，
@@ -511,6 +557,8 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     /* ---------------- 事件 ---------------- */
     const onMove = (e: PointerEvent) => {
+      // 收到真实的 pointermove 就说明「刚才的拖拽结束了 / 指针回到页面了」
+      markTracking();
       rememberPointer(e.clientX, e.clientY);
       // 指针压在 iframe 上（视频、评论区）：立刻收起自绘、交还系统光标。
       // 这一步必须「一次到位」—— 命中 iframe 之后顶层文档就收不到 pointermove 了。
@@ -525,17 +573,27 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     /**
      * 指针离开某个元素。
      *
-     * 这里**只**用来捕捉「一步跨进 iframe」：那种情况下浏览器给的事件序列是
-     * `pointerout`（relatedTarget 就是 iframe）紧跟着把后续事件全交给 iframe，
-     * 顶层再也收不到任何事件，必须在 out 这一刻就把光标收起来。
+     * 两种需要收起的情况：
+     *  - `relatedTarget` 就是 iframe：一步跨进 iframe，此后顶层收不到任何事件；
+     *  - `relatedTarget` 为 null：可能离开了页面（移到浏览器工具栏、别的窗口），
+     *    但要**延迟确认** —— 指针下的元素被替换时（换页、列表重排）浏览器同样给 null。
      *
-     * ⚠️ 不再把 `relatedTarget === null` 当成「已离开」：指针下的元素被替换
-     * （换页、列表重排）时浏览器同样给 null，那样会把正常页面误判成离开 ——
-     * 自绘一停、`cursor: none` 又把系统光标藏了，屏幕上就一个光标都没有。
+     * ⚠️ 曾经把 null 一律当「离开」→ 换页时被误判 → 停画 + `cursor:none` => 一个光标都不剩；
+     * 后来又改成「完全不信 null」→ 拖拽/移到浏览器界面时自绘冻在旧位置 => 鼠标处也没有光标。
+     * 两种都错，正解是「延迟确认 + 事件可撤销」。
      */
     const onPointerOut = (e: PointerEvent) => {
       const related = e.relatedTarget as Node | null;
-      pointerOutside = isIframe(related) || shouldHide(e.target, e.clientX, e.clientY);
+      if (isIframe(related)) {
+        markTracking();
+        untracked = true;
+        return;
+      }
+      if (related === null) {
+        scheduleUntrack();
+        return;
+      }
+      // 页面内部换元素：什么都不用做（几何判断交给 move / over / 心跳）
     };
 
     /**
@@ -549,15 +607,32 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
      * 自定义光标却冻在边界外一动不动」。
      */
     const onPointerOver = (e: PointerEvent) => {
+      const related = e.relatedTarget as Node | null;
+      // 只有「从页面内另一个元素移过来」才说明跟踪正常；拖拽结束 / 从窗口外回来时
+      // 浏览器补发的那条 pointerover 是 `relatedTarget === null` + 旧坐标，不能当数。
+      if (related !== null && !isIframe(related)) markTracking();
       rememberPointer(e.clientX, e.clientY);
       pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
     };
 
     /**
-     * 滚动不产生 `pointermove`，但会把 iframe 挪到指针底下（或从指针底下挪走），
-     * 也可能把页面滚到「指针坐标已经落到视口外」的状态，所以滚动后重算一次。
-     * 没收到过真实事件时坐标还是初始值，不能拿来做判定。
+     * `pointercancel` 表示**指针已不再受页面跟踪**（最典型就是「按下时手抖」触发了
+     * 浏览器原生拖拽：`dragstart` → `pointercancel`，之后只有 `drag` 事件）。
+     * 此后自绘再也拿不到新坐标，必须收起、把光标交给系统（拖拽有浏览器自己的光标）。
      */
+    const onPointerCancel = () => {
+      if (untrackTimer) {
+        clearTimeout(untrackTimer);
+        untrackTimer = 0;
+      }
+      untracked = true;
+    };
+
+    /** 原生拖拽开始（拖链接 / 拖图片）：同上，收起自绘 */
+    const onDragStart = () => {
+      onPointerCancel();
+    };
+
     const onScroll = () => {
       revalidate();
     };
@@ -568,6 +643,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       // 让任何被误判成「已离开」的情况能**立刻自愈**（原地连点时没有 move/over，
       // 少了这一步就得等用户移动鼠标才恢复）。
       // 点 iframe 时顶层根本收不到 pointerdown，无需在这里处理。
+      markTracking();
       rememberPointer(e.clientX, e.clientY);
       pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
       playPiano();
@@ -632,8 +708,11 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerdown", onDown, { passive: true });
+    window.addEventListener("pointercancel", onPointerCancel, { passive: true });
     window.addEventListener("keydown", onKey, { passive: true });
     window.addEventListener("mousedown", suppressMultiClickSelection, true);
+    // 原生拖拽（拖链接/图片）：拖拽期间浏览器不发 pointermove，必须收起自绘
+    document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("pointerout", onPointerOut, { passive: true });
     document.addEventListener("pointerover", onPointerOver, { passive: true });
     // 滚动事件不冒泡，用捕获阶段才收得到外壳里那个滚动容器
@@ -840,12 +919,15 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     return () => {
       cancelAnimationFrame(raf);
+      if (untrackTimer) clearTimeout(untrackTimer);
       window.removeEventListener("resize", resize);
       window.removeEventListener("resize", revalidate);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", suppressMultiClickSelection, true);
+      document.removeEventListener("dragstart", onDragStart, true);
       document.removeEventListener("pointerout", onPointerOut);
       document.removeEventListener("pointerover", onPointerOver);
       document.removeEventListener("scroll", onScroll, { capture: true });
