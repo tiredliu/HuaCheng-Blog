@@ -610,14 +610,21 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
 - **几何判定**（`shouldHide`）：坐标**出了视口**或**压在 iframe 上**（`isIframe(target)` /
   `pointInIframe(x, y)` 矩形命中）才收起。这部分「可以被事件/心跳纠正」。
 - **`untracked`（指针已不受页面跟踪）**：由 `pointercancel`、`dragstart`、以及
-  `pointerout` 的 `relatedTarget === null` 置位；**只能由真实的 `pointermove` / `pointerdown`
-  （或从页面内另一个元素移过来的 `pointerover`）解除**。这是「拖拽/移出页面」的正解，
-  也是为什么不能在 `pointerout(null)` 上立刻收起又立刻放开。
-- ⚠️ **`relatedTarget === null` 必须「延迟确认」**（`LEAVE_CONFIRM = 160ms`）：指针下的元素
-  被替换（换页、列表重排）时浏览器**同样给 null**，但紧接着就会有 `pointerover`/`pointermove`
-  —— 那就把定时器撤掉；真的移出去则一条事件都不会再来。
+  `pointerout` 的 `relatedTarget === null` 置位。
+  ⚠️ **解除不能只靠 `pointermove`**：拖拽中、或指针停在浏览器工具栏上时，浏览器**根本不会**
+  发 `pointermove`，只等它就会出现「光标没了、动鼠标也不回来」（用户实测日志最后一行就是
+  `收起自绘 ← pointercancel：…原生拖拽`，之后再没有任何事件）。所以还要靠**手势收尾事件**：
+  - `drag`（拖拽中）：浏览器只发 drag、但**带着坐标**，用它保持「最后位置」新鲜；
+  - `dragend`：按最新坐标重新判定 —— 指针还在页面上就恢复自绘（位置是准的），落在页面外就继续收起；
+  - `pointerup`：普通的点击/触控收尾也给一次重新判定的机会。
+- ⚠️ **`relatedTarget === null` 必须「延迟确认」+「贴着视口边界」两个条件同时满足**
+  （`LEAVE_CONFIRM = 160ms`、`atViewportEdge` 容差 12px）：
+  指针下的元素被替换（换页、列表重排、**giscus 每次导航都重建 iframe**）时也给 null，
+  但那一刻坐标在页面中间 —— 少了边界过滤，快速切页会被误判成「离开」并收起光标
+  （用户实测日志里成对出现的 `收起 ← 指针离开页面` / `恢复 ← pointermove` 就是这个）。
+  而真的移出去（到浏览器工具栏、别的窗口）必然贴着某条边，且之后一条事件都不会再来。
   历史教训：**一律当「离开」**→ 换页时误判 → 一个光标都不剩；**完全不信 null** → 拖拽时冻在旧位置。
-  两种都错，正解是「延迟确认 + 事件可撤销」。
+  正解是「贴边 + 延迟确认 + 手势收尾可解除」。
 - **200ms 心跳复算**（`draw` 里按当前坐标重判）只负责清**几何层面**的误判，**绝不清 `untracked`**
   —— 否则「指针在浏览器界面上」又会被误恢复成「冻在页面里的光标」。
 - **指针位置存在模块级 `lastPointer`**，不放 effect 内：effect 依赖 `[color, codeColor]`，

@@ -375,6 +375,21 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       x < 0 || y < 0 || x > vw || y > vh;
 
     /**
+     * 坐标是否**贴着（或已越出）视口边界** —— 只有这种情况才可能是「指针真的离开页面」。
+     *
+     * ⚠️ 用来过滤 `pointerout` 的 `relatedTarget === null`：指针下的元素被替换
+     * （换页、列表重排、**giscus 反复重建 iframe**）时浏览器**同样给 null**，
+     * 但那一刻坐标在页面中间；而真的移出去必然贴着某条边。少了这道过滤，
+     * 快速切页时会被误判成「离开」→ 收起自绘 → 鼠标处一个光标都没有（要等下次移动才恢复）。
+     */
+    const EDGE_TOLERANCE = 12;
+    const atViewportEdge = (x: number, y: number): boolean =>
+      x < EDGE_TOLERANCE ||
+      y < EDGE_TOLERANCE ||
+      x > vw - EDGE_TOLERANCE ||
+      y > vh - EDGE_TOLERANCE;
+
+    /**
      * **唯一**的「该不该收起自绘光标」判定。只看几何，不看 `relatedTarget` —— 后者
      * 在「指针下的元素刚被替换」时也会是 null，会把正常页面误判成「已离开」。
      */
@@ -411,12 +426,13 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
      * 延迟 `LEAVE_CONFIRM` 再确认：元素被替换导致的 null 紧接着会有事件到达，
      * 那时 `markTracking()` 会把定时器撤掉；真的移出去则一条事件都不会再来。
      */
-    const scheduleUntrack = () => {
+    const scheduleUntrack = (x: number, y: number) => {
       if (untrackTimer) clearTimeout(untrackTimer);
+      const where = `${Math.round(x)},${Math.round(y)}`;
       untrackTimer = window.setTimeout(() => {
         untrackTimer = 0;
         untracked = true;
-        revalidate("指针离开页面：pointerout 的 relatedTarget 为 null 且 160ms 内没有任何事件");
+        revalidate(`指针离开页面：pointerout 的 relatedTarget 为 null（坐标 ${where}）且 ${LEAVE_CONFIRM}ms 内没有任何事件`);
       }, LEAVE_CONFIRM);
     };
 
@@ -614,7 +630,9 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         return;
       }
       if (related === null) {
-        scheduleUntrack();
+        // ⚠️ 必须再确认「坐标贴着视口边界」：元素被替换（换页、giscus 重建 iframe）时也给 null，
+        // 但那时坐标在页面中间，不能当成「离开了页面」。
+        if (atViewportEdge(e.clientX, e.clientY)) scheduleUntrack(e.clientX, e.clientY);
         return;
       }
       // 页面内部换元素：什么都不用做（几何判断交给 move / over / 心跳）
@@ -660,6 +678,34 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     const onDragStart = (e: DragEvent) => {
       onPointerCancel();
       trace(`dragstart：开始拖拽（target=${(e.target as Element | null)?.tagName ?? "?"}）`);
+    };
+
+    /**
+     * 拖拽过程中浏览器**只发 `drag`**（不发 `pointermove`），但 `drag` 事件带着坐标 ——
+     * 用它让「最后已知位置」保持新鲜，这样松手那一刻的判定才是准的。
+     */
+    const onDrag = (e: DragEvent) => {
+      if (e.clientX || e.clientY) rememberPointer(e.clientX, e.clientY);
+    };
+
+    /**
+     * 拖拽结束：按**最新坐标**重新判定一次。
+     *
+     * ⚠️ 这是「卡住」的正解：`pointercancel` 之后浏览器可能一直不发 `pointermove`
+     * （拖拽中、或指针停在浏览器工具栏上），光靠「等一个 pointermove」永远等不到 ——
+     * 用户看到的就是「光标没了、动鼠标也不回来」。`dragend` 一定会来，在这里收尾即可：
+     * 指针还在页面上就恢复自绘（坐标是新鲜的，位置准确），落在页面外就继续收起。
+     */
+    const onDragEnd = (e: DragEvent) => {
+      if (e.clientX || e.clientY) rememberPointer(e.clientX, e.clientY);
+      markTracking();
+      revalidate("dragend（拖拽结束，按最新坐标重新判定）");
+    };
+
+    /** 手势收尾（点击结束、触控被取消后）：给「已不再跟踪」一个及时解除的机会 */
+    const onPointerUp = () => {
+      markTracking();
+      revalidate("pointerup（手势结束）");
     };
 
     const onScroll = () => {
@@ -738,11 +784,15 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerdown", onDown, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, { passive: true });
     window.addEventListener("pointercancel", onPointerCancel, { passive: true });
     window.addEventListener("keydown", onKey, { passive: true });
     window.addEventListener("mousedown", suppressMultiClickSelection, true);
-    // 原生拖拽（拖链接/图片）：拖拽期间浏览器不发 pointermove，必须收起自绘
+    // 原生拖拽（拖链接/图片）：拖拽期间浏览器不发 pointermove，必须收起自绘；
+    // 拖拽中靠 `drag` 保持坐标新鲜，`dragend` 时收尾（否则会一直收不起来）
     document.addEventListener("dragstart", onDragStart, true);
+    document.addEventListener("drag", onDrag, true);
+    document.addEventListener("dragend", onDragEnd, true);
     document.addEventListener("pointerout", onPointerOut, { passive: true });
     document.addEventListener("pointerover", onPointerOver, { passive: true });
     // 滚动事件不冒泡，用捕获阶段才收得到外壳里那个滚动容器
@@ -954,10 +1004,13 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       window.removeEventListener("resize", onResizeRevalidate);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", suppressMultiClickSelection, true);
       document.removeEventListener("dragstart", onDragStart, true);
+      document.removeEventListener("drag", onDrag, true);
+      document.removeEventListener("dragend", onDragEnd, true);
       document.removeEventListener("pointerout", onPointerOut);
       document.removeEventListener("pointerover", onPointerOver);
       document.removeEventListener("scroll", onScroll, { capture: true });
