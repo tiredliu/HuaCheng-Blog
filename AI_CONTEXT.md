@@ -589,23 +589,34 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
   默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
   也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
 
-### 13. 自定义光标：`pointerout` 的 `relatedTarget === null` ≠「进了 iframe」
+### 13. 自定义光标：别用 `relatedTarget === null` 判断「离开了页面」
 
 `MouseCursorEffect` 用 `pointerOutside` 决定「是否把光标交还系统」：为 `true` 时整层清空停画，
 而全局 CSS 又设了 `html[data-cursor-fx="on"] * { cursor: none }` —— 所以**一旦误判成 true，
-屏幕上会一个光标都不剩**（自绘的停画、系统的被藏着）。
+屏幕上会一个光标都不剩**（自绘的停画、系统的被藏着），且未必能自愈。
 
-浏览器给 `relatedTarget === null` 的场景**不止「进入跨域 iframe」**：
-移出窗口、以及**原生浮层盖住指针**时（最典型是 Edge 的「选中迷你菜单」）都会给 null。
-曾经把 null 一律当 out，结果**在正文里连点几次**（触发双击选词 → 弹出该迷你菜单）光标就消失了，
-而且**原地点击不产生 move/over，无法自愈**，只能移动鼠标或刷新才回来。
-VSCode 的 webview 没有这个原生浮层，所以**在 VSCode 里复现不出来**。
+**踩过的坑（前后踩了两次，别再回头）**：曾经把 `pointerout` 的 `relatedTarget === null`
+一律当成「离开页面」。但浏览器给 null 的场景**远不止离开**：指针下的元素刚被替换掉
+（客户端换页、列表重排）、以及**原生浮层盖住指针**时（最典型是 Edge 的「选中迷你菜单」）
+也会给 null。于是在**正文里连点几次**、或**来回快速切换导航页**时，光标会莫名其妙消失；
+而「原地点击 / 鼠标停着不动」不产生 move/over，就**没有事件能把它纠正回来**。
+VSCode 的 webview 没有这个原生浮层、也不会那样换页，所以**在 VSCode 里复现不出来**。
 
-**做法**：只用**几何**判定是否「真的在 iframe 上」——
-`isIframe(relatedTarget) || pointInIframe(e.clientX, e.clientY)`；
-null 且坐标落在正文上时**不隐藏**。再在 `pointerdown` 里据当前坐标重算一次，让误判能立刻自愈。
-另外把整套绘制包进 `try/finally` 且**无条件续帧**：某帧偶发抛错也不会断掉 rAF 链，
-不会因「不重绘 + `cursor:none`」让光标永久消失。
+**现在的做法**：
+
+- **只做几何判定**（`shouldHide`）：坐标**出了视口**（进了 DevTools 停靠区 / 出了窗口），
+  或**压在 iframe 上**（`isIframe(target)` 或 `pointInIframe(x, y)` 矩形命中）才算「离开」。
+  `pointerout` 只保留「一步跨进 iframe」这一种用途（那里 `relatedTarget` 就是 iframe）。
+  正文上收到 null **不再隐藏**。
+- **200ms 心跳复算**（在 `draw` 里按当前坐标重新判定一次）：不管什么原因被误置成「收起」，
+  只要坐标确实落在页面上，最多一两百毫秒就自己恢复，**不需要用户动鼠标**。
+  `resize` 时也立即复算一次（视口变了，坐标可能已经落在视口外）。**这是防「光标卡死」的底线，别删。**
+- **指针位置存在模块级 `lastPointer`**，不放 effect 内：effect 依赖 `[color, codeColor]`，
+  在设置里改一次光标颜色就会重跑；若位置只在 effect 内初始化，光标会被重置到**视口中心**。
+- `drawReveal` 里的 `clip` / `destination-in` 包进 `try/finally`：`drawImage` 一旦抛错，
+  `restore()` 会被跳过，clip 与混合模式将**永久**留在上下文里，画布从此永远是空的。
+- 整套绘制同样包在 `try/finally` 里**无条件续帧**：某帧抛错也不会断掉 rAF 链。
+
 
 ---
 

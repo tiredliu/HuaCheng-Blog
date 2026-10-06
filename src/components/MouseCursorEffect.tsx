@@ -119,6 +119,17 @@ interface Stamp {
   t: number;
 }
 
+/**
+ * 上一次已知的指针位置（**模块级**，故意不放进 effect 里）。
+ *
+ * ⚠️ 必须放在 effect 外：`CursorLayer` 的 effect 依赖是 `[color, codeColor]`，
+ * 用户在设置里改一次光标颜色 / 代码颜色就会重跑一次。如果位置只在 effect 内初始化，
+ * 重跑后光标会被重置到**视口中心** —— 表现就是「改了颜色之后光标不见了」，
+ * 得动一下鼠标才回到指针处。放在模块级即可让位置跨 effect 重跑延续。
+ * （同时只有一个页面实例，所以用模块级变量是安全的。）
+ */
+const lastPointer = { x: 0, y: 0, seen: false };
+
 export function MouseCursorEffect({
   enabled,
   color,
@@ -263,7 +274,10 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     observer.observe(root, { attributes: true, attributeFilter: ["class"] });
 
     /* ---------------- 状态 ---------------- */
-    const pointer = { x: vw / 2, y: vh / 2 };
+    // 位置优先沿用上一次（模块级），避免 effect 重跑时把光标重置到视口中心
+    const pointer = lastPointer.seen
+      ? { x: lastPointer.x, y: lastPointer.y }
+      : { x: vw / 2, y: vh / 2 };
     let stamps: Stamp[] = [];
     // 印记锚点：只有真正放下印记时才推进，否则小步移动永远不会积累到间距
     let anchorX = pointer.x;
@@ -272,19 +286,27 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     let raf = 0;
     let lastKeyAt = 0;
     let lastBurstAt = 0;
+    /** 上一次「心跳复算」的时刻（见 draw）：用来把「误判成收起」兜回来 */
+    let lastValidate = 0;
     /**
-     * 指针是否已经离开顶层文档（进入 iframe —— 例如 Giscus 评论框、B 站视频 ——
-     * 或移出窗口）。
+     * 是否要把自绘光标「收起来、交还给系统」。
      *
-     * iframe 是**独立文档**：指针移进去之后顶层窗口收不到 `pointermove`，
-     * 自定义光标会「冻」在 iframe 边界外不动（而 iframe 里显示的是系统光标）。
-     * 所以一旦判定进入 iframe，就把整层清空、停止绘制，**把光标交还给系统**。
+     * 只在两种**几何上确凿**的情况下为 true：
+     *  - 指针压在一个 iframe 上（Giscus 评论框、B 站视频等）：iframe 是独立文档，
+     *    顶层窗口收不到后续 `pointermove`，自绘若不收起来就会「冻」在边界外；
+     *  - 指针坐标已经不在页面视口内（进了 DevTools 停靠区、出了窗口）：
+     *    这时系统光标在那些区域本来就可见。
+     *
+     * ⚠️ **刻意不看 `pointerout` 的 `relatedTarget === null`**。浏览器给 null 的场景
+     * 远不止「离开页面」：指针下的元素被替换掉（导航换页、列表重排）时也会给 null。
+     * 早先版本拿它当「已离开」，于是快速切换页面时偶尔会被误判成离开 —— 自绘停画、
+     * 而 CSS 又设了 `cursor: none`，屏幕上**一个光标都不剩**。
      */
     let pointerOutside = false;
-    /** 「已进入 iframe」状态下是否已经清过屏：清一次就够，不必每帧重复 clearRect */
+    /** 「已离开」状态下是否已经清过屏：清一次就够，不必每帧重复 clearRect */
     let outsideCleared = false;
-    /** 是否收到过真实的 pointermove（没有的话，指针坐标还是初始的视口中心，不能拿它做几何判定） */
-    let pointerSeen = false;
+    /** 是否收到过真实的指针事件（没有的话，坐标还是初始值，不能拿它做几何判定） */
+    let pointerSeen = lastPointer.seen;
 
     /**
      * 判断一个节点是不是 iframe。
@@ -329,6 +351,48 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     /** 指针此刻是否压在 iframe 上（视频播放器、评论框都是跨域 iframe） */
     const overIframe = (target: EventTarget | null, x: number, y: number): boolean =>
       isIframe(target) || pointInIframe(x, y);
+
+    /** 坐标是否已经不在页面视口内（进了 DevTools 停靠区、或被挪到窗口外） */
+    const outsideViewport = (x: number, y: number): boolean =>
+      x < 0 || y < 0 || x > vw || y > vh;
+
+    /**
+     * **唯一**的「该不该收起自绘光标」判定。只看几何，不看 `relatedTarget` —— 后者
+     * 在「指针下的元素刚被替换」时也会是 null，会把正常页面误判成「已离开」。
+     */
+    const shouldHide = (target: EventTarget | null, x: number, y: number): boolean =>
+      outsideViewport(x, y) || overIframe(target, x, y);
+
+    /** 记下指针位置（跨 effect 重跑沿用，避免光标被重置到视口中心） */
+    const rememberPointer = (x: number, y: number) => {
+      pointer.x = x;
+      pointer.y = y;
+      pointerSeen = true;
+      lastPointer.x = x;
+      lastPointer.y = y;
+      lastPointer.seen = true;
+    };
+
+    /**
+     * 按**当前坐标**重新判定一次「是否收起」。
+     *
+     * 事件之外也会被周期性调用（见 `draw` 里的心跳）：因为「收起」一旦被误置，
+     * 若之后恰好没有指针事件（原地点击、鼠标停着不动、换页时元素被替换……），
+     * 就永远等不到一条能纠正它的事件 —— 屏幕上一个光标都没有，只能刷新页面。
+     * 周期性复算把这种「卡死」压缩到最多一两百毫秒，且完全不依赖用户操作。
+     */
+    const revalidate = () => {
+      if (!pointerSeen) return;
+      pointerOutside = shouldHide(
+        document.elementFromPoint(pointer.x, pointer.y),
+        pointer.x,
+        pointer.y,
+      );
+    };
+    revalidate(); // 恢复上次位置后先按「当前视口」判定一次（视口可能已经变了）
+    // 视口尺寸变化（DevTools 开合、窗口缩放）后立刻重算：坐标可能已经落到视口外，
+    // 或者原本压在指针下的 iframe 被挪走了。心跳也能兜住，但这里能快 200ms。
+    window.addEventListener("resize", revalidate);
 
     /** 从锚点向目标点走，每隔 STAMP_SPACING 放一个印记，保证拖尾连续 */
     const addStamps = (toX: number, toY: number) => {
@@ -447,37 +511,31 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     /* ---------------- 事件 ---------------- */
     const onMove = (e: PointerEvent) => {
-      // 指针压在 iframe 上（视频、评论区）：立刻隐藏特效，光标交还系统。
+      rememberPointer(e.clientX, e.clientY);
+      // 指针压在 iframe 上（视频、评论区）：立刻收起自绘、交还系统光标。
       // 这一步必须「一次到位」—— 命中 iframe 之后顶层文档就收不到 pointermove 了。
-      if (overIframe(e.target, e.clientX, e.clientY)) {
+      if (shouldHide(e.target, e.clientX, e.clientY)) {
         pointerOutside = true;
-        pointerSeen = true;
         return;
       }
       pointerOutside = false;
-      pointerSeen = true;
-      pointer.x = e.clientX;
-      pointer.y = e.clientY;
       addStamps(e.clientX, e.clientY);
     };
 
     /**
      * 指针离开某个元素。
      *
-     * 进入以下区域时顶层文档都收不到后续 `pointermove`，自绘若不处理会「冻」在最后位置
-     * （六芒星还在转、坐标却不动，看起来就是「光标无法移动」）：
-     *  - 进入 iframe（Giscus 评论框、B 站视频等跨域 iframe）；
-     *  - 进入 DevTools 停靠区 / 其它原生浮层（Edge「选中迷你菜单」等），此时 `relatedTarget` 为 null；
-     *  - 移出整个窗口，`relatedTarget` 也为 null。
+     * 这里**只**用来捕捉「一步跨进 iframe」：那种情况下浏览器给的事件序列是
+     * `pointerout`（relatedTarget 就是 iframe）紧跟着把后续事件全交给 iframe，
+     * 顶层再也收不到任何事件，必须在 out 这一刻就把光标收起来。
      *
-     * 统一定为「已离开」并隐藏自绘 —— 这些区域里**系统光标本身可见**（iframe 内、
-     * DevTools 内、菜单上都有原生光标），隐藏自绘后交互照常，体验正确。
-     * 只要指针回到页面即由 `onMove` / `onPointerOver` 复位，`onDown` 还保证连点原地不动也能自愈，
-     * 不会像早先那样卡成「一个光标都没有」。
+     * ⚠️ 不再把 `relatedTarget === null` 当成「已离开」：指针下的元素被替换
+     * （换页、列表重排）时浏览器同样给 null，那样会把正常页面误判成离开 ——
+     * 自绘一停、`cursor: none` 又把系统光标藏了，屏幕上就一个光标都没有。
      */
     const onPointerOut = (e: PointerEvent) => {
       const related = e.relatedTarget as Node | null;
-      pointerOutside = related === null || isIframe(related) || pointInIframe(e.clientX, e.clientY);
+      pointerOutside = isIframe(related) || shouldHide(e.target, e.clientX, e.clientY);
     };
 
     /**
@@ -491,29 +549,27 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
      * 自定义光标却冻在边界外一动不动」。
      */
     const onPointerOver = (e: PointerEvent) => {
-      pointerOutside = overIframe(e.target, e.clientX, e.clientY);
+      rememberPointer(e.clientX, e.clientY);
+      pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
     };
 
     /**
      * 滚动不产生 `pointermove`，但会把 iframe 挪到指针底下（或从指针底下挪走），
-     * 所以滚动后要按「指针当前所在位置」重新判定一次。
-     * 没收到过真实移动时坐标是初始的视口中心，不能拿来做判定。
+     * 也可能把页面滚到「指针坐标已经落到视口外」的状态，所以滚动后重算一次。
+     * 没收到过真实事件时坐标还是初始值，不能拿来做判定。
      */
     const onScroll = () => {
-      if (!pointerSeen) return;
-      pointerOutside = overIframe(document.elementFromPoint(pointer.x, pointer.y), pointer.x, pointer.y);
+      revalidate();
     };
 
     const onDown = (e: PointerEvent) => {
       ensureAudio(); // 首次手势即解锁音频
-      // 点击本身也是一次「指针确实在文档内」的确认：据当前坐标重算一次状态，
-      // 让任何被误判成「已离开」的情况能**立刻自愈**（连点原地不动时没有 move/over，
+      // 点击本身也是一次「指针确实在页面里」的确认：据当前坐标重算一次状态，
+      // 让任何被误判成「已离开」的情况能**立刻自愈**（原地连点时没有 move/over，
       // 少了这一步就得等用户移动鼠标才恢复）。
       // 点 iframe 时顶层根本收不到 pointerdown，无需在这里处理。
-      pointerSeen = true;
-      pointerOutside = overIframe(e.target, e.clientX, e.clientY);
-      pointer.x = e.clientX;
-      pointer.y = e.clientY;
+      rememberPointer(e.clientX, e.clientY);
+      pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
       playPiano();
       // 点击处来一小片「揭开」的代码；连点时限制频率，避免印记堆积导致卡顿
       const now = performance.now();
@@ -703,16 +759,23 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       const mh = Math.min(mask.height - my, Math.ceil(bh * MASK_SCALE));
       if (sw <= 0 || sh <= 0 || mw <= 0 || mh <= 0) return;
 
+      // ⚠️ 这一段的 ctx 状态（clip + 混合模式）必须保证被还原：
+      // 若 `drawImage` 抛错，下面的 `restore()` 就会被跳过 —— clip 与
+      // `destination-in` 会**永久**留在上下文里，之后每帧的 clearRect / 描边
+      // 都被裁进那个小矩形、还按 destination-in 互相擦除，画布永远是空的
+      // （只能刷新页面才恢复）。所以包进 try/finally。
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(bx, by, bw, bh);
-      ctx.clip();
-      // 代码纹理：主画布已按 dpr 缩放，所以目标用 CSS 像素
-      ctx.drawImage(codeTexture, sx, sy, sw, sh, sx / dpr, sy / dpr, sw / dpr, sh / dpr);
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.drawImage(mask, mx, my, mw, mh, mx / MASK_SCALE, my / MASK_SCALE, mw / MASK_SCALE, mh / MASK_SCALE);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.restore();
+      try {
+        ctx.beginPath();
+        ctx.rect(bx, by, bw, bh);
+        ctx.clip();
+        // 代码纹理：主画布已按 dpr 缩放，所以目标用 CSS 像素
+        ctx.drawImage(codeTexture, sx, sy, sw, sh, sx / dpr, sy / dpr, sw / dpr, sh / dpr);
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.drawImage(mask, mx, my, mw, mh, mx / MASK_SCALE, my / MASK_SCALE, mw / MASK_SCALE, mh / MASK_SCALE);
+      } finally {
+        ctx.restore();
+      }
     };
 
     /**
@@ -730,8 +793,17 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         // 两者混用会让 age 变成负数 —— 涟漪半径算出负值，arc 直接抛错。
         const now = performance.now();
 
-        // 指针进了 iframe：拿不到 pointermove，整层清空停止绘制，
-        // 免得没有跟随的光标「冻」在 iframe 边界外（清一次就够，不必每帧重来）
+        // 心跳复算（每 200ms）：按当前坐标重新判定一次「是否收起」。
+        // 这是「光标卡在不可见状态」的兜底 —— 不管是什么原因把它误置成了收起，
+        // 只要指针坐标确实落在页面上，最多一两百毫秒就会自己恢复，**不需要**任何
+        // 用户操作（原地连点、鼠标停着不动、换页时元素被替换都不会产生指针事件）。
+        if (pointerSeen && now - lastValidate >= 200) {
+          lastValidate = now;
+          revalidate();
+        }
+
+        // 指针在 iframe 上 / 已经出了视口：整层清空停止绘制，
+        // 免得没有跟随的光标「冻」在边界外（清一次就够，不必每帧重来）
         if (pointerOutside) {
           if (!outsideCleared) {
             ctx.clearRect(0, 0, vw, vh);
@@ -769,6 +841,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", revalidate);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
