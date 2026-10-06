@@ -432,7 +432,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       if (process.env.NODE_ENV === "production") return;
       if (pointerOutside === lastTraced) return;
       lastTraced = pointerOutside;
-      console.debug(
+      console.log(
         `[cursor-fx] ${pointerOutside ? "收起自绘（交还系统光标）" : "恢复自绘"} ← ${reason}`,
       );
     };
