@@ -32,6 +32,12 @@ const eslintConfig = defineConfig([
      * 这些文件既不是我们的代码，也不该进版本库（.gitignore 已忽略）。
      */
     "**/.obsidian/**",
+    /**
+     * `.workbuddy` 是本机工作目录（.gitignore 已忽略），里面会落下
+     * CDP 验证用的临时打包产物（如 `tmp/iframe-test/bundle.js`），不是项目源码，
+     * 跳过以免误导 lint 结果。
+     */
+    ".workbuddy/**",
   ]),
   {
     rules: {

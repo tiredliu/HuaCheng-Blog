@@ -15,7 +15,7 @@
 | 是什么 | 个人博客，纯静态（构建期生成 HTML，运行期没有 Node） |
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
 | 内容在哪 | `content/posts/*.md(x)`（frontmatter + 正文），**这是唯一的内容真相来源**。`.md` 与 `.mdx` **等价**，都走 MDX 管线 |
-| 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
+| 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/emojis/`（评论区表情包）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
 | 公开留言/评论 | 走 **Giscus**（GitHub Discussions，配置在 `site-settings.json` 的 `giscus`）；`content/guestbook.json` + `comments.json` 只在**没配 Giscus** 时作为本机兜底 |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
 | 浏览量后端 | `functions/api/[[route]].js`（Pages Function + D1，同源 `/api`，**跟站点一起部署**；见 `functions/README.md`） |
@@ -375,11 +375,33 @@ Worker 会去 `GET /repos/{owner}/{repo}` 看 `permissions.push`，
 | `src/lib/site-settings.ts` | 站点默认值的类型、校验、**防闪屏脚本生成** | 客户端安全 |
 | `src/lib/site-settings-file.ts` | 构建期读 JSON | 服务端专用 |
 | `src/lib/github-upload.ts` | 直连 GitHub API：传图、删图、读写设置文件（传图目录由 `AssetDir` 指定） | 客户端专用 |
-| `src/lib/assets.ts` | 资源目录约定：`ASSET_DIRS` / `assetUrl()` / `musicUrl()` / `lyricUrl()` | 零依赖，客户端安全 |
+| `src/lib/assets.ts` | 资源目录约定：`ASSET_DIRS` / `assetUrl()` / `musicUrl()` / `lyricUrl()` / `emojiUrl()` | 零依赖，客户端安全 |
+| `src/components/EmojiPicker.tsx` | 评论区表情面板：GitHub 短代码（1870）+ 图片表情包，可搜索可分类，点一下复制 | 数据**首次展开时**才 fetch |
+| `src/hooks/useMediaSession.ts` | 把播放状态同步给系统媒体控制中心（手机通知栏 / 锁屏） | 见下面的边界表 |
 | `src/lib/lyrics.ts` | LRC 解析与「当前唱到哪一句」（**纯函数，可直接用 Node 跑**） | 客户端安全 |
 | `src/lib/audio-effects.ts` | Web Audio 音效链：三段均衡 + 现场生成的混响 | 客户端专用，见硬约束 13 |
 | `src/hooks/usePersistentState.ts` | localStorage ⇄ React（`useSyncExternalStore`） | 见硬约束 5 |
 | `src/mdx-components.tsx` | MDX 全局组件映射 | Next 约定文件，签名不能改 |
+
+### `useMediaSession` 的边界表
+
+媒体通知（手机通知栏 / 锁屏）是**浏览器和系统画的**，网页只能给元数据 + 响应规定好的动作：
+
+| 想要的东西 | 能不能做 | 怎么做 |
+| --- | --- | --- |
+| 封面 / 歌名 / 歌手 / 专辑 | ✅ | `new MediaMetadata({...})` |
+| 能拖动的进度条 | ✅ | `setPositionState()` **并且**注册 `seekto` —— 少了后者就只能看不能拖 |
+| 上一首 / 下一首 | ✅ | `previoustrack` / `nexttrack`，歌单只有 1 首时不注册 |
+| 后退 / 前进若干秒 | ✅ | `seekbackward` / `seekforward`，步长读 `details.seekOffset`（各家不同） |
+| 自定义按钮（比如「音效」） | ❌ | 只有原生 App 能做到 |
+| 歌词 / 自定义布局 | ❌ | 元数据里没有任何放正文的字段 |
+
+两个必踩的坑：
+
+1. **artwork 必须给绝对地址**（`new URL(src, location.href)`）—— 相对路径会被直接忽略，
+   表现是「别的都有、唯独没封面」。
+2. **只在 `playing` 时才写 metadata** —— 一篇文章可能同时有侧栏播放器与正文内嵌播放器，
+   谁都能写，最后写的说了算；不播的那个写了就会把正在播那首的封面盖掉。
 
 ---
 

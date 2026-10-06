@@ -19,6 +19,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { LyricsPanel } from "@/components/LyricsPanel";
+import { useMediaSession } from "@/hooks/useMediaSession";
 import {
   AUDIO_EFFECT_LABEL,
   AUDIO_EFFECT_PRESETS,
@@ -194,6 +195,15 @@ export function MusicPlayer({ tracks, className }: MusicPlayerProps) {
     audio.muted = muted;
   }, [volume, muted, track?.src]);
 
+  /** 暂停。单独拆出来，是因为通知栏的「暂停」按钮也要用它 */
+  const pause = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    // 用户主动暂停：取消「换歌后续播」的意图，免得之后莫名自己响起来
+    pendingPlayRef.current = false;
+    audio.pause();
+  }, []);
+
   /* ---------------- 事件绑定 ---------------- */
 
   useEffect(() => {
@@ -250,11 +260,9 @@ export function MusicPlayer({ tracks, className }: MusicPlayerProps) {
     if (audio.paused) {
       void play();
     } else {
-      // 用户主动暂停：取消「换歌后续播」的意图，免得之后莫名自己响起来
-      pendingPlayRef.current = false;
-      audio.pause();
+      pause();
     }
-  }, [play, track]);
+  }, [pause, play, track]);
 
   /** 点列表里的某一首 */
   const playAt = useCallback(
@@ -335,17 +343,47 @@ export function MusicPlayer({ tracks, className }: MusicPlayerProps) {
     [applyEffect, setEffect],
   );
 
-  const seek = (value: number) => {
+  const seek = useCallback((value: number) => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.currentTime = value;
-    setCurrent(value);
-  };
+    const at = Number.isFinite(value) ? Math.min(Math.max(value, 0), audio.duration || value) : 0;
+    audio.currentTime = at;
+    setCurrent(at);
+  }, []);
+
+  /** 快退 / 快进若干秒。通知栏的前进后退按钮走这里 */
+  const seekBy = useCallback((delta: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    seek(audio.currentTime + delta);
+  }, [seek]);
 
   const changeVolume = (value: number) => {
     setVolume(value);
     if (value > 0) setMuted(false);
   };
+
+  /** 通知栏的上一首 / 下一首（歌单只有一首时没什么可切，就不注册这两个按钮） */
+  const previous = useCallback(() => step(-1), [step]);
+  const nextTrack = useCallback(() => step(1), [step]);
+
+  /**
+   * 把曲目信息同步给系统媒体控制中心 —— 手机上就是通知栏与锁屏那块。
+   * 不做的话通知栏只有一个光秃秃的播放按钮；做了就有封面、标题、歌手和上下首。
+   */
+  useMediaSession({
+    track,
+    playing,
+    duration,
+    position: current,
+    onPlay: play,
+    onPause: pause,
+    onPrevious: list.length > 1 ? previous : undefined,
+    onNext: list.length > 1 ? nextTrack : undefined,
+    // 有了 seekto，通知栏那条进度条才是「能拖」的；没有它只能看
+    onSeek: seek,
+    onSeekBy: seekBy,
+  });
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   const ModeIcon = MODE_ICON[mode];

@@ -11,6 +11,7 @@
  * | `public/wallpapers/` | 站点壁纸大图 | 设置面板里填 `/wallpapers/x.jpg` |
  * | `public/music/` | 音频（mp3 / wav / flac …） | `musicUrl("x.mp3")`、`<AudioPlayer src="/music/x.mp3" />` |
  * | `public/lyrics/` | 歌词（`.lrc`） | `src/lib/music.ts` 里给曲目填 `lyrics: lyricUrl("x.lrc")` |
+ * | `public/emojis/` | 评论区图片表情包（`index.json` 是清单） | `emojiUrl("x.png")` |
  * | `public/uploads/` | TinaCMS 媒体库与「上传到仓库」的落点（混杂区） | `/uploads/x.jpg` |
  *
  * ⚠️ `public/uploads/` **不能删**：
@@ -34,6 +35,8 @@ export const ASSET_DIRS = {
   music: "/music",
   /** 歌词 */
   lyrics: "/lyrics",
+  /** 评论区图片表情包 */
+  emojis: "/emojis",
   /** 上传落点（TinaCMS 媒体库 / 直传仓库） */
   uploads: "/uploads",
 } as const;
@@ -46,6 +49,7 @@ export const ASSET_REPO_DIRS: Record<AssetDir, string> = {
   wallpapers: "public/wallpapers",
   music: "public/music",
   lyrics: "public/lyrics",
+  emojis: "public/emojis",
   uploads: "public/uploads",
 };
 
@@ -98,3 +102,6 @@ export const musicUrl = (fileName: string): string => assetUrl("music", fileName
 
 /** 歌词（LRC） */
 export const lyricUrl = (fileName: string): string => assetUrl("lyrics", fileName);
+
+/** 评论区图片表情包 */
+export const emojiUrl = (fileName: string): string => assetUrl("emojis", fileName);

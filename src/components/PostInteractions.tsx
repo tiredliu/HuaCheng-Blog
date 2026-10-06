@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { MessageSquare } from "lucide-react";
+import { EmojiPicker } from "@/components/EmojiPicker";
 import { CommentThreadView } from "@/components/CommentThreadView";
 import { GiscusComments } from "@/components/GiscusComments";
 import { useThemeState } from "@/components/ThemeContext";
@@ -49,6 +50,11 @@ export function PostInteractions({ slug, repoComments, settings, giscus }: PostI
           heading="评论"
           hint="评论由 GitHub Discussions 提供：登录一次 GitHub 账号即可在全站通用（各篇文章与留言板共用同一个登录），换账号可在评论区内点击退出登录；数据保存在仓库的 Discussions 里，可随时导出。"
         />
+        {/*
+          表情面板放在评论区**下方**：giscus 的输入框在 iframe 里，而 iframe 是按照
+          「评论列表 + 输入框」一起渲染的，放在上面会被评论列表顶到看不见的地方。
+        */}
+        <EmojiPicker className="mt-3" />
       </div>
     );
   }
