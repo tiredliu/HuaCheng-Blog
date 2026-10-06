@@ -462,12 +462,21 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     };
 
     /**
-     * 指针离开顶层文档：`relatedTarget` 为 null（进了 iframe / 移出窗口），
-     * 或者直接就是 iframe（部分浏览器的行为）。
+     * 指针离开某个元素。
+     *
+     * ⚠️ **不能把 `relatedTarget === null` 直接当成「进了 iframe」**：
+     * 浏览器在多处都会给 null —— 进入 iframe、移出窗口，还有**原生浮层**
+     * 盖住指针时（最典型的是 Edge 的「选中迷你菜单」）。
+     * 后两种情况下若一律置为「已离开」，自绘光标就停画了，而 CSS 又设了
+     * `cursor: none` —— 屏幕上会**一个光标都不剩**，且原地点击不会自愈
+     * （点击不产生 move/over）—— 表现正是「连点几次后光标和鼠标都不见了」。
+     *
+     * 所以改为**几何判定**：只有 `relatedTarget` 确实是 iframe、
+     * 或指针坐标落在某个 iframe 矩形内，才算真的进了 iframe。
      */
     const onPointerOut = (e: PointerEvent) => {
       const related = e.relatedTarget as Node | null;
-      if (related === null || isIframe(related)) pointerOutside = true;
+      pointerOutside = isIframe(related) || pointInIframe(e.clientX, e.clientY);
     };
 
     /**
@@ -496,6 +505,12 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
 
     const onDown = (e: PointerEvent) => {
       ensureAudio(); // 首次手势即解锁音频
+      // 点击本身也是一次「指针确实在文档内」的确认：据当前坐标重算一次状态，
+      // 让任何被误判成「已离开」的情况能**立刻自愈**（连点原地不动时没有 move/over，
+      // 少了这一步就得等用户移动鼠标才恢复）。
+      // 点 iframe 时顶层根本收不到 pointerdown，无需在这里处理。
+      pointerSeen = true;
+      pointerOutside = overIframe(e.target, e.clientX, e.clientY);
       pointer.x = e.clientX;
       pointer.y = e.clientY;
       playPiano();
@@ -699,44 +714,54 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       ctx.restore();
     };
 
+    /**
+     * ⚠️ 整帧绘制包在 `try/finally` 里，`finally` 中**无条件续帧**。
+     *
+     * 视觉特效不值得因为某一帧的偶发异常（例如坐标异常让 `arc` 半径算成负数）
+     * 就把 rAF 链断掉：链一断就不再重绘，而系统光标又被 `cursor: none` 藏着，
+     * 用户看到的就是「光标和鼠标都不见了」，且只能刷新页面才能恢复。
+     * 异常仍照常抛到控制台便于排查，但绘制循环不会死。
+     */
     const draw = () => {
-      // 帧时间统一用 performance.now()：事件里记的也是它。
-      // rAF 回调的时间戳是「帧开始」时刻，可能早于事件发生时刻，
-      // 两者混用会让 age 变成负数 —— 涟漪半径算出负值，arc 直接抛错。
-      const now = performance.now();
+      try {
+        // 帧时间统一用 performance.now()：事件里记的也是它。
+        // rAF 回调的时间戳是「帧开始」时刻，可能早于事件发生时刻，
+        // 两者混用会让 age 变成负数 —— 涟漪半径算出负值，arc 直接抛错。
+        const now = performance.now();
 
-      // 指针进了 iframe / 出了窗口：拿不到 pointermove，整层清空停止绘制，
-      // 免得没有跟随的光标「冻」在 iframe 边界外（清一次就够，不必每帧重来）
-      if (pointerOutside) {
-        if (!outsideCleared) {
-          ctx.clearRect(0, 0, vw, vh);
-          outsideCleared = true;
+        // 指针进了 iframe：拿不到 pointermove，整层清空停止绘制，
+        // 免得没有跟随的光标「冻」在 iframe 边界外（清一次就够，不必每帧重来）
+        if (pointerOutside) {
+          if (!outsideCleared) {
+            ctx.clearRect(0, 0, vw, vh);
+            outsideCleared = true;
+          }
+          return;
         }
+        outsideCleared = false;
+
+        ctx.clearRect(0, 0, vw, vh);
+        drawReveal(now);
+
+        // 点击涟漪（与光标同色）
+        for (let i = ripples.length - 1; i >= 0; i -= 1) {
+          const r = ripples[i];
+          const age = Math.max(0, (now - r.t) / RIPPLE_LIFE);
+          if (age >= 1) {
+            ripples.splice(i, 1);
+            continue;
+          }
+          ctx.strokeStyle = `rgba(${rgbStr}, ${(1 - age) * 0.55})`;
+          ctx.lineWidth = 1.6 * (1 - age) + 0.3;
+          ctx.beginPath();
+          ctx.arc(r.x, r.y, 6 + age * 28, 0, TAU);
+          ctx.stroke();
+        }
+
+        drawStar(now);
+      } finally {
         raf = requestAnimationFrame(draw);
-        return;
       }
-      outsideCleared = false;
-
-      ctx.clearRect(0, 0, vw, vh);
-      drawReveal(now);
-
-      // 点击涟漪（与光标同色）
-      for (let i = ripples.length - 1; i >= 0; i -= 1) {
-        const r = ripples[i];
-        const age = Math.max(0, (now - r.t) / RIPPLE_LIFE);
-        if (age >= 1) {
-          ripples.splice(i, 1);
-          continue;
-        }
-        ctx.strokeStyle = `rgba(${rgbStr}, ${(1 - age) * 0.55})`;
-        ctx.lineWidth = 1.6 * (1 - age) + 0.3;
-        ctx.beginPath();
-        ctx.arc(r.x, r.y, 6 + age * 28, 0, TAU);
-        ctx.stroke();
-      }
-
-      drawStar(now);
-      raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
 
