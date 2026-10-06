@@ -93,6 +93,21 @@ export function AudioPlayer({
     }
   };
 
+  const seek = useCallback((value: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const at = Number.isFinite(value) ? Math.min(Math.max(value, 0), audio.duration || value) : 0;
+    audio.currentTime = at;
+    setCurrent(at);
+  }, []);
+
+  /** 快退 / 快进若干秒。通知栏的前进后退按钮走这里 */
+  const seekBy = useCallback((delta: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    seek(audio.currentTime + delta);
+  }, [seek]);
+
   /** 通知栏同样显示这首歌的信息（没有上一首/下一首，就只注册播放暂停） */
   const track = useMemo<Track>(
     () => ({ id: src, title, artist, src, cover }),
@@ -105,14 +120,10 @@ export function AudioPlayer({
     position: current,
     onPlay: play,
     onPause: pause,
+    // 内嵌播放器没有歌单，但进度条还是该能拖
+    onSeek: seek,
+    onSeekBy: seekBy,
   });
-
-  const seek = (value: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = value;
-    setCurrent(value);
-  };
 
   const toggleMute = () => {
     const audio = audioRef.current;

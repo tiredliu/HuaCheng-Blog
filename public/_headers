@@ -26,6 +26,10 @@
   Cache-Control: public, max-age=86400
   Content-Type: text/plain; charset=utf-8
 
+# 评论区图片表情包：跑 npm run emoji:pack 会重新生成，缓存短一些方便替换
+/emojis/*
+  Cache-Control: public, max-age=86400
+
 /uploads/*
   Cache-Control: public, max-age=86400
 

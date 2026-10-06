@@ -8,6 +8,8 @@
     "dev:next": "next dev",
     "new": "node scripts/new-post.mjs",
     "lyrics": "node scripts/import-lyrics.mjs",
+    "emoji:data": "node scripts/build-emoji-data.mjs",
+    "emoji:pack": "node scripts/build-emoji-pack.mjs",
     "build": "node scripts/tina.mjs build && next build",
     "build:cms": "node scripts/tina.mjs build",
     "build:app": "next build",
