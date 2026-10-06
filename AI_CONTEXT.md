@@ -607,6 +607,14 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
 
 **做法**（三条一起才成立）：
 
+- **从源头拦掉「链接上的拖拽」**（`onDragStart` 里 `preventDefault`）——**这才是用户报告的
+  「快速连点导航后光标消失」的根因**：在链接上按住的瞬间手抖几像素，浏览器就开始拖这个链接
+  （`dragstart` → `pointercancel`），此后**只发 `drag` 不发 `pointermove`**，自绘只能收起；
+  实测每次连点都会让光标闪掉一下（像素序列第一帧为 0），被浏览器接管时更会一直不回来。
+  博客里拖链接没有实际用途（新标签页用 Ctrl+点击 / 中键），误触却极常见，所以直接拦掉。
+  **只拦 `<a>`**：正文里拖选中的文字、拖图片等照旧（已用 `defaultPrevented` 断言验证）。
+  复现/验证脚本：`cdp-jitter.mjs`（真实鼠标按下 + 6px 抖动；修复前序列 `0 899 …`，
+  修复后 `848 908 …` 且 `pointercancel` 不再出现）。
 - **几何判定**（`shouldHide`）：坐标**出了视口**或**压在 iframe 上**（`isIframe(target)` /
   `pointInIframe(x, y)` 矩形命中）才收起。这部分「可以被事件/心跳纠正」。
 - **`untracked`（指针已不受页面跟踪）**：由 `pointercancel`、`dragstart`、以及

@@ -691,10 +691,29 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       setUntracked("pointercancel：指针已不再受页面跟踪（多为按下的同时手抖触发了原生拖拽）");
     };
 
-    /** 原生拖拽开始（拖链接 / 拖图片）：同上，收起自绘 */
+    /**
+     * 原生拖拽开始。
+     *
+     * ⚠️ **链接上的拖拽几乎一定是「按下时手抖」误触的**，而它正是「鼠标处突然没有光标」的根因：
+     * 快速连点导航链接时，只要在按住的瞬间移动几像素，浏览器就开始拖这个链接 —— 事件序列是
+     * `dragstart` → `pointercancel`，此后**不再派发 `pointermove`**（拖拽期间只发 `drag`），
+     * 自绘拿不到坐标只能收起；若这个拖拽被浏览器接管（超级拖拽 / 拖到界面上），
+     * 连 `dragend` 都不会有，就会一直没光标（实测：只发 `pointercancel` 后画布空白 4s+）。
+     * 博客里「拖链接」没有实际用途（要新标签页用 Ctrl+点击 / 中键），误触却极常见 ——
+     * 所以直接在 `dragstart` 拦掉（`preventDefault`），从源头让这类消失不再发生。
+     * 只拦 `<a>`：正文里**拖选中的文字**、拖图片等行为照旧。
+     */
     const onDragStart = (e: DragEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest?.("a")) {
+        e.preventDefault();
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[cursor-fx] 链接上的误触拖拽已拦下（不收起自绘）");
+        }
+        return;
+      }
       onPointerCancel();
-      trace(`dragstart：开始拖拽（target=${(e.target as Element | null)?.tagName ?? "?"}）`);
+      trace(`dragstart：开始拖拽（target=${el?.tagName ?? "?"}）`);
     };
 
     /**
