@@ -416,7 +416,25 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       untrackTimer = window.setTimeout(() => {
         untrackTimer = 0;
         untracked = true;
+        revalidate("指针离开页面：pointerout 的 relatedTarget 为 null 且 160ms 内没有任何事件");
       }, LEAVE_CONFIRM);
+    };
+
+    /**
+     * dev 下把「收起 / 恢复」的**原因**打到控制台。
+     *
+     * Next.js 的 dev 会把浏览器的 `console` 转发到终端（终端里带 `[browser]` 前缀），
+     * 所以复现时能在终端直接看到「为什么收起」，不必再靠猜。只在**状态真的变化**时打一行，
+     * 平时完全静默；生产构建里 `process.env.NODE_ENV === "production"` 会被静态替换，是空操作。
+     */
+    let lastTraced = false;
+    const trace = (reason: string) => {
+      if (process.env.NODE_ENV === "production") return;
+      if (pointerOutside === lastTraced) return;
+      lastTraced = pointerOutside;
+      console.debug(
+        `[cursor-fx] ${pointerOutside ? "收起自绘（交还系统光标）" : "恢复自绘"} ← ${reason}`,
+      );
     };
 
     /**
@@ -429,16 +447,19 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
      * ⚠️ 它**只清几何层面的判断，绝不清 `untracked`**：后者代表「浏览器不再给我们
      * 坐标」（拖拽中 / 指针在浏览器界面上），只能由真实的指针事件来解除。
      */
-    const revalidate = () => {
+    const revalidate = (reason = "周期性复算") => {
       if (!pointerSeen) return;
       pointerOutside =
         untracked ||
         shouldHide(document.elementFromPoint(pointer.x, pointer.y), pointer.x, pointer.y);
+      trace(reason);
     };
-    revalidate(); // 恢复上次位置后先按「当前视口」判定一次（视口可能已经变了）
+
+    revalidate("初始化"); // 恢复上次位置后先按「当前视口」判定一次（视口可能已经变了）
     // 视口尺寸变化（DevTools 开合、窗口缩放）后立刻重算：坐标可能已经落到视口外，
     // 或者原本压在指针下的 iframe 被挪走了。心跳也能兜住，但这里能快 200ms。
-    window.addEventListener("resize", revalidate);
+    const onResizeRevalidate = () => revalidate("视口尺寸变化（resize）");
+    window.addEventListener("resize", onResizeRevalidate);
 
     /** 从锚点向目标点走，每隔 STAMP_SPACING 放一个印记，保证拖尾连续 */
     const addStamps = (toX: number, toY: number) => {
@@ -564,9 +585,11 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       // 这一步必须「一次到位」—— 命中 iframe 之后顶层文档就收不到 pointermove 了。
       if (shouldHide(e.target, e.clientX, e.clientY)) {
         pointerOutside = true;
+        trace("pointermove：坐标压在 iframe 上 / 已出视口");
         return;
       }
       pointerOutside = false;
+      trace("pointermove");
       addStamps(e.clientX, e.clientY);
     };
 
@@ -587,6 +610,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       if (isIframe(related)) {
         markTracking();
         untracked = true;
+        revalidate("pointerout：relatedTarget 就是 iframe（一步跨进 iframe）");
         return;
       }
       if (related === null) {
@@ -612,7 +636,10 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       // 浏览器补发的那条 pointerover 是 `relatedTarget === null` + 旧坐标，不能当数。
       if (related !== null && !isIframe(related)) markTracking();
       rememberPointer(e.clientX, e.clientY);
-      pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
+      // ⚠️ 必须带上 `untracked`：漏掉它的话，拖拽结束后那条补发的 pointerover 会把光标
+      // 又画回旧位置（看起来就是「光标冻在那儿」）。
+      pointerOutside = untracked || shouldHide(e.target, e.clientX, e.clientY);
+      trace(`pointerover（related=${related === null ? "null" : "元素"}）`);
     };
 
     /**
@@ -626,15 +653,17 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         untrackTimer = 0;
       }
       untracked = true;
+      revalidate("pointercancel：指针已不再受页面跟踪（多为按下的同时手抖触发了原生拖拽）");
     };
 
     /** 原生拖拽开始（拖链接 / 拖图片）：同上，收起自绘 */
-    const onDragStart = () => {
+    const onDragStart = (e: DragEvent) => {
       onPointerCancel();
+      trace(`dragstart：开始拖拽（target=${(e.target as Element | null)?.tagName ?? "?"}）`);
     };
 
     const onScroll = () => {
-      revalidate();
+      revalidate("滚动（scroll）");
     };
 
     const onDown = (e: PointerEvent) => {
@@ -646,6 +675,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       markTracking();
       rememberPointer(e.clientX, e.clientY);
       pointerOutside = shouldHide(e.target, e.clientX, e.clientY);
+      trace("pointerdown");
       playPiano();
       // 点击处来一小片「揭开」的代码；连点时限制频率，避免印记堆积导致卡顿
       const now = performance.now();
@@ -921,7 +951,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       cancelAnimationFrame(raf);
       if (untrackTimer) clearTimeout(untrackTimer);
       window.removeEventListener("resize", resize);
-      window.removeEventListener("resize", revalidate);
+      window.removeEventListener("resize", onResizeRevalidate);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointercancel", onPointerCancel);

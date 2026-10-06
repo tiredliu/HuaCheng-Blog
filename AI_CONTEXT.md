@@ -625,9 +625,17 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
 - `drawReveal` 里的 `clip` / `destination-in` 包进 `try/finally`：`drawImage` 一旦抛错，
   `restore()` 会被跳过，clip 与混合模式将**永久**留在上下文里，画布从此永远是空的。
 - 整套绘制同样包在 `try/finally` 里**无条件续帧**：某帧抛错也不会断掉 rAF 链。
+- ⚠️ **任何直接给 `pointerOutside` 赋值的地方都必须带上 `untracked`**（`onPointerOver` 尤其容易漏）：
+  漏掉之后，拖拽结束 / 从窗口外回来时浏览器补发的那条 `pointerover` 会把光标又画回旧位置 ——
+  看起来就是「光标冻在那儿」，正是这个 bug 的表象。
+- **dev 下有一行原因日志**（`trace()`）：状态每次在「收起 / 恢复」之间切换时打一条
+  `[cursor-fx] 收起自绘（交还系统光标） ← 原因`。Next.js 的 dev 会把浏览器 console 转发到终端
+  （带 `[browser]` 前缀），所以复现时直接在终端就能看到**为什么**收起，不用再靠猜。
+  生产构建里 `process.env.NODE_ENV === "production"` 被静态替换掉，是空操作；正常移动**不会**打日志。
 - 调试提示：验证这类东西要用 CDP + **`--headless=new`**（headful 会被真实系统光标污染）；
   判断「光标画在哪」要用**全部非透明像素的质心**并等 1.2s 让拖尾淡出（拖尾会把质心拉向路径中点）；
-  复现原生拖拽用 `Input.dispatchMouseEvent` 的 `mousePressed` + 若干 `mouseMoved`（`buttons: 1`）。
+  复现原生拖拽用 `Input.dispatchMouseEvent` 的 `mousePressed` + 若干 `mouseMoved`（`buttons: 1`）；
+  录屏分析见 `.workbuddy/tmp/video-frames/`（浏览器解码抽帧 + 紫色像素聚类跟踪光标）。
 
 
 ---
