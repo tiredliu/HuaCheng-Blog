@@ -56,6 +56,15 @@ const MASK_SCALE = 0.5; // 遮罩画布相对视口的分辨率（软边，半�
  * 别的窗口）则一条事件都不会再来。
  */
 const LEAVE_CONFIRM = 160;
+/**
+ * ms。收起自绘之后，如果**这么长时间里一条指针事件都没有**，就按当前坐标强制恢复自绘。
+ *
+ * ⚠️ 这是「鼠标处一个光标都没有」的最后一道保险，**必须保留**。
+ * 实测：浏览器在「拖拽被接管」（原生拖拽 / Edge 超级拖拽 / 指针停在浏览器界面上）之后
+ * 可能**再也不发 `pointermove` 也不发 `dragend`**，日志只剩一行 `收起自绘 ← pointercancel`。
+ * 此时若只等事件来解除，就会一直没光标（用户看到「卡住、动鼠标也不恢复」）。
+ */
+const STUCK_RECOVER = 1000;
 
 // 被「拨开」露出的代码内容（伪代码，仅作视觉纹理）
 const CODE_LINES = [
@@ -321,6 +330,8 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
      * 这两种情况下自绘都拿不到坐标，只能收起（系统光标在那些区域本来就可见）。
      */
     let untracked = false;
+    /** `untracked` 置位的时刻：供 `draw` 里的兜底复算判断「已经收起多久了」 */
+    let untrackedSince = 0;
     /** 「可能离开页面」的确认定时器（见 `LEAVE_CONFIRM`） */
     let untrackTimer = 0;
     /** 是否收到过真实的指针事件（没有的话，坐标还是初始值，不能拿它做几何判定） */
@@ -431,8 +442,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       const where = `${Math.round(x)},${Math.round(y)}`;
       untrackTimer = window.setTimeout(() => {
         untrackTimer = 0;
-        untracked = true;
-        revalidate(`指针离开页面：pointerout 的 relatedTarget 为 null（坐标 ${where}）且 ${LEAVE_CONFIRM}ms 内没有任何事件`);
+        setUntracked(`指针离开页面：pointerout 的 relatedTarget 为 null（坐标 ${where}）且 ${LEAVE_CONFIRM}ms 内没有任何事件`);
       }, LEAVE_CONFIRM);
     };
 
@@ -451,6 +461,15 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       console.log(
         `[cursor-fx] ${pointerOutside ? "收起自绘（交还系统光标）" : "恢复自绘"} ← ${reason}`,
       );
+    };
+
+    /** 把「指针已不再受页面跟踪」置位（并记下时刻，供 draw 里的兜底复算用） */
+    const setUntracked = (reason: string) => {
+      if (!untracked) {
+        untracked = true;
+        untrackedSince = performance.now();
+      }
+      revalidate(reason);
     };
 
     /**
@@ -625,8 +644,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
       const related = e.relatedTarget as Node | null;
       if (isIframe(related)) {
         markTracking();
-        untracked = true;
-        revalidate("pointerout：relatedTarget 就是 iframe（一步跨进 iframe）");
+        setUntracked("pointerout：relatedTarget 就是 iframe（一步跨进 iframe）");
         return;
       }
       if (related === null) {
@@ -670,8 +688,7 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         clearTimeout(untrackTimer);
         untrackTimer = 0;
       }
-      untracked = true;
-      revalidate("pointercancel：指针已不再受页面跟踪（多为按下的同时手抖触发了原生拖拽）");
+      setUntracked("pointercancel：指针已不再受页面跟踪（多为按下的同时手抖触发了原生拖拽）");
     };
 
     /** 原生拖拽开始（拖链接 / 拖图片）：同上，收起自绘 */
@@ -959,6 +976,18 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
         if (pointerSeen && now - lastValidate >= 200) {
           lastValidate = now;
           revalidate();
+          // 兜底：收起之后如果**一条事件都没有**（拖拽被浏览器接管、超级拖拽、指针停在
+          // 浏览器界面上……），不能永远不出光标。超过 STUCK_RECOVER 且当前坐标可画、
+          // 页面仍有焦点时，就按当前坐标恢复自绘。
+          if (
+            untracked &&
+            now - untrackedSince >= STUCK_RECOVER &&
+            document.hasFocus() &&
+            !shouldHide(document.elementFromPoint(pointer.x, pointer.y), pointer.x, pointer.y)
+          ) {
+            untracked = false;
+            revalidate(`兜底：收起已超过 ${STUCK_RECOVER}ms 且期间没有任何事件，按当前坐标恢复自绘`);
+          }
         }
 
         // 指针在 iframe 上 / 已经出了视口：整层清空停止绘制，

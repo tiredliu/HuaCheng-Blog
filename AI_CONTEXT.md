@@ -625,8 +625,15 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
   而真的移出去（到浏览器工具栏、别的窗口）必然贴着某条边，且之后一条事件都不会再来。
   历史教训：**一律当「离开」**→ 换页时误判 → 一个光标都不剩；**完全不信 null** → 拖拽时冻在旧位置。
   正解是「贴边 + 延迟确认 + 手势收尾可解除」。
+- ⚠️⚠️ **`STUCK_RECOVER = 1000ms` 的兜底复算（必备，别删）**：浏览器在「拖拽被接管」之后可能
+  **再也不发 `pointermove`、也不发 `dragend`**（日志里只剩一行 `收起自绘 ← pointercancel`），
+  只等事件就永远等不到 —— 用户看到「光标没了、动鼠标也不恢复」。
+  实测复现：只派发一次 `pointercancel`、之后一条事件都不发 → 画布 **0 像素持续 4s+**。
+  修法：在 `draw` 的心跳里，若 `untracked` 持续超过 `STUCK_RECOVER`、期间无任何事件、
+  当前坐标可画（`!shouldHide`）、且 `document.hasFocus()`，就按当前坐标恢复自绘。
+  `hasFocus` 这一条还顺带让「用户去点浏览器工具栏」时**保持收起**（那时页面失焦）。
 - **200ms 心跳复算**（`draw` 里按当前坐标重判）只负责清**几何层面**的误判，**绝不清 `untracked`**
-  —— 否则「指针在浏览器界面上」又会被误恢复成「冻在页面里的光标」。
+  —— 否则「指针在浏览器界面上」又会被误恢复成「冻在页面里的光标」（兜底交给上面的超时机制）。
 - **指针位置存在模块级 `lastPointer`**，不放 effect 内：effect 依赖 `[color, codeColor]`，
   在设置里改一次光标颜色就会重跑；若位置只在 effect 内初始化，光标会被重置到**视口中心**。
 - `drawReveal` 里的 `clip` / `destination-in` 包进 `try/finally`：`drawImage` 一旦抛错，
