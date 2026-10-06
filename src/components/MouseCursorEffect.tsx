@@ -464,19 +464,20 @@ function CursorLayer({ color, codeColor }: { color: string; codeColor: string })
     /**
      * 指针离开某个元素。
      *
-     * ⚠️ **不能把 `relatedTarget === null` 直接当成「进了 iframe」**：
-     * 浏览器在多处都会给 null —— 进入 iframe、移出窗口，还有**原生浮层**
-     * 盖住指针时（最典型的是 Edge 的「选中迷你菜单」）。
-     * 后两种情况下若一律置为「已离开」，自绘光标就停画了，而 CSS 又设了
-     * `cursor: none` —— 屏幕上会**一个光标都不剩**，且原地点击不会自愈
-     * （点击不产生 move/over）—— 表现正是「连点几次后光标和鼠标都不见了」。
+     * 进入以下区域时顶层文档都收不到后续 `pointermove`，自绘若不处理会「冻」在最后位置
+     * （六芒星还在转、坐标却不动，看起来就是「光标无法移动」）：
+     *  - 进入 iframe（Giscus 评论框、B 站视频等跨域 iframe）；
+     *  - 进入 DevTools 停靠区 / 其它原生浮层（Edge「选中迷你菜单」等），此时 `relatedTarget` 为 null；
+     *  - 移出整个窗口，`relatedTarget` 也为 null。
      *
-     * 所以改为**几何判定**：只有 `relatedTarget` 确实是 iframe、
-     * 或指针坐标落在某个 iframe 矩形内，才算真的进了 iframe。
+     * 统一定为「已离开」并隐藏自绘 —— 这些区域里**系统光标本身可见**（iframe 内、
+     * DevTools 内、菜单上都有原生光标），隐藏自绘后交互照常，体验正确。
+     * 只要指针回到页面即由 `onMove` / `onPointerOver` 复位，`onDown` 还保证连点原地不动也能自愈，
+     * 不会像早先那样卡成「一个光标都没有」。
      */
     const onPointerOut = (e: PointerEvent) => {
       const related = e.relatedTarget as Node | null;
-      pointerOutside = isIframe(related) || pointInIframe(e.clientX, e.clientY);
+      pointerOutside = related === null || isIframe(related) || pointInIframe(e.clientX, e.clientY);
     };
 
     /**
