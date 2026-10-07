@@ -589,6 +589,77 @@ await import(`@/content/posts/${post.fileName}`)   // glob = content/posts/*
   默认值 `{ right: 24, bottom: 24 }` 不需要先量视口尺寸，
   也就不用在 effect 里读 `window.innerWidth` 再 setState 回写（硬约束 6）。
 
+### 13. 自定义光标：真正的坑是「浏览器不再给我们坐标」，不是 `relatedTarget`
+
+`MouseCursorEffect` 用 `pointerOutside` 决定「是否把光标交还系统」：为 `true` 时整层清空停画，
+而全局 CSS 又设了 `html[data-cursor-fx="on"] * { cursor: none }` —— 所以判定一旦不对，
+**屏幕上可能一个光标都不剩**（自绘的停画/冻住、系统的又被藏着）。这个模块前后改了三次，别再回头。
+
+**根因（从录屏逐帧分析定位出来的）**：自绘光标的坐标**只来自 `pointermove`**。而浏览器
+在下面这些情况下**根本不派发 `pointermove`**：
+
+1. **按下的同时手抖 → 触发原生拖拽**（`dragstart` → `pointercancel`，之后只有 `drag`）。
+   快速连点导航链接时非常容易触发，实测只要按下后移动几像素就会发生。
+   此时自绘冻在最后位置不动，而 `cursor: none` 又把系统光标藏了 ⇒ 鼠标处一个光标都没有。
+   **VSCode 的 webview 不会这样触发拖拽，所以「在 VSCode 里无法复现」。**
+2. **指针移到浏览器自己的界面上**（工具栏/书签栏、地址栏）或别的窗口 ⇒ 页面收不到任何事件。
+3. 指针进入 iframe（独立文档）。
+
+**做法**（三条一起才成立）：
+
+- **从源头拦掉「链接上的拖拽」**（`onDragStart` 里 `preventDefault`）——**这才是用户报告的
+  「快速连点导航后光标消失」的根因**：在链接上按住的瞬间手抖几像素，浏览器就开始拖这个链接
+  （`dragstart` → `pointercancel`），此后**只发 `drag` 不发 `pointermove`**，自绘只能收起；
+  实测每次连点都会让光标闪掉一下（像素序列第一帧为 0），被浏览器接管时更会一直不回来。
+  博客里拖链接没有实际用途（新标签页用 Ctrl+点击 / 中键），误触却极常见，所以直接拦掉。
+  **只拦 `<a>`**：正文里拖选中的文字、拖图片等照旧（已用 `defaultPrevented` 断言验证）。
+  复现/验证脚本：`cdp-jitter.mjs`（真实鼠标按下 + 6px 抖动；修复前序列 `0 899 …`，
+  修复后 `848 908 …` 且 `pointercancel` 不再出现）。
+- **几何判定**（`shouldHide`）：坐标**出了视口**或**压在 iframe 上**（`isIframe(target)` /
+  `pointInIframe(x, y)` 矩形命中）才收起。这部分「可以被事件/心跳纠正」。
+- **`untracked`（指针已不受页面跟踪）**：由 `pointercancel`、`dragstart`、以及
+  `pointerout` 的 `relatedTarget === null` 置位。
+  ⚠️ **解除不能只靠 `pointermove`**：拖拽中、或指针停在浏览器工具栏上时，浏览器**根本不会**
+  发 `pointermove`，只等它就会出现「光标没了、动鼠标也不回来」（用户实测日志最后一行就是
+  `收起自绘 ← pointercancel：…原生拖拽`，之后再没有任何事件）。所以还要靠**手势收尾事件**：
+  - `drag`（拖拽中）：浏览器只发 drag、但**带着坐标**，用它保持「最后位置」新鲜；
+  - `dragend`：按最新坐标重新判定 —— 指针还在页面上就恢复自绘（位置是准的），落在页面外就继续收起；
+  - `pointerup`：普通的点击/触控收尾也给一次重新判定的机会。
+- ⚠️ **`relatedTarget === null` 必须「延迟确认」+「贴着视口边界」两个条件同时满足**
+  （`LEAVE_CONFIRM = 160ms`、`atViewportEdge` 容差 12px）：
+  指针下的元素被替换（换页、列表重排、**giscus 每次导航都重建 iframe**）时也给 null，
+  但那一刻坐标在页面中间 —— 少了边界过滤，快速切页会被误判成「离开」并收起光标
+  （用户实测日志里成对出现的 `收起 ← 指针离开页面` / `恢复 ← pointermove` 就是这个）。
+  而真的移出去（到浏览器工具栏、别的窗口）必然贴着某条边，且之后一条事件都不会再来。
+  历史教训：**一律当「离开」**→ 换页时误判 → 一个光标都不剩；**完全不信 null** → 拖拽时冻在旧位置。
+  正解是「贴边 + 延迟确认 + 手势收尾可解除」。
+- ⚠️⚠️ **`STUCK_RECOVER = 1000ms` 的兜底复算（必备，别删）**：浏览器在「拖拽被接管」之后可能
+  **再也不发 `pointermove`、也不发 `dragend`**（日志里只剩一行 `收起自绘 ← pointercancel`），
+  只等事件就永远等不到 —— 用户看到「光标没了、动鼠标也不恢复」。
+  实测复现：只派发一次 `pointercancel`、之后一条事件都不发 → 画布 **0 像素持续 4s+**。
+  修法：在 `draw` 的心跳里，若 `untracked` 持续超过 `STUCK_RECOVER`、期间无任何事件、
+  当前坐标可画（`!shouldHide`）、且 `document.hasFocus()`，就按当前坐标恢复自绘。
+  `hasFocus` 这一条还顺带让「用户去点浏览器工具栏」时**保持收起**（那时页面失焦）。
+- **200ms 心跳复算**（`draw` 里按当前坐标重判）只负责清**几何层面**的误判，**绝不清 `untracked`**
+  —— 否则「指针在浏览器界面上」又会被误恢复成「冻在页面里的光标」（兜底交给上面的超时机制）。
+- **指针位置存在模块级 `lastPointer`**，不放 effect 内：effect 依赖 `[color, codeColor]`，
+  在设置里改一次光标颜色就会重跑；若位置只在 effect 内初始化，光标会被重置到**视口中心**。
+- `drawReveal` 里的 `clip` / `destination-in` 包进 `try/finally`：`drawImage` 一旦抛错，
+  `restore()` 会被跳过，clip 与混合模式将**永久**留在上下文里，画布从此永远是空的。
+- 整套绘制同样包在 `try/finally` 里**无条件续帧**：某帧抛错也不会断掉 rAF 链。
+- ⚠️ **任何直接给 `pointerOutside` 赋值的地方都必须带上 `untracked`**（`onPointerOver` 尤其容易漏）：
+  漏掉之后，拖拽结束 / 从窗口外回来时浏览器补发的那条 `pointerover` 会把光标又画回旧位置 ——
+  看起来就是「光标冻在那儿」，正是这个 bug 的表象。
+- **dev 下有一行原因日志**（`trace()`）：状态每次在「收起 / 恢复」之间切换时打一条
+  `[cursor-fx] 收起自绘（交还系统光标） ← 原因`。Next.js 的 dev 会把浏览器 console 转发到终端
+  （带 `[browser]` 前缀），所以复现时直接在终端就能看到**为什么**收起，不用再靠猜。
+  生产构建里 `process.env.NODE_ENV === "production"` 被静态替换掉，是空操作；正常移动**不会**打日志。
+- 调试提示：验证这类东西要用 CDP + **`--headless=new`**（headful 会被真实系统光标污染）；
+  判断「光标画在哪」要用**全部非透明像素的质心**并等 1.2s 让拖尾淡出（拖尾会把质心拉向路径中点）；
+  复现原生拖拽用 `Input.dispatchMouseEvent` 的 `mousePressed` + 若干 `mouseMoved`（`buttons: 1`）；
+  录屏分析见 `.workbuddy/tmp/video-frames/`（浏览器解码抽帧 + 紫色像素聚类跟踪光标）。
+
+
 ---
 
 ## 七、常见改动的标准做法
