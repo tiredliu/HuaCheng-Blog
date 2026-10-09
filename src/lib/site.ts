@@ -60,6 +60,7 @@ export function withBasePath(pathname: string): string {
  * | `public/images/x.jpg` | 同上 —— `public/` 就是站点的根目录 |
  * | `./public\images\x.jpg` | 同上（`./` 与反斜杠都会先被清理） |
  * | `images/x.jpg` | 同上（`images/` `wallpapers/` `music/` `lyrics/` `uploads/` 的前导斜杠都可以省） |
+ * | `../../public/images/x.jpg` | `/images/x.jpg` —— Obsidian / Typora 插入的**相对**写法（编辑器直接能显示） |
  * | `https://…` / `data:…` / 其它 | 原样返回 |
  *
  * 目录清单来自 `src/lib/assets.ts`（`ASSET_DIR_LIST`），新增资源目录只要改那一处。
@@ -76,6 +77,16 @@ export function resolveImageSrc(value: unknown): string | null {
   if (!src) return null;
 
   if (src.startsWith("./")) src = src.slice(2);
+
+  /**
+   * 去掉开头的 `../`。
+   *
+   * Obsidian 的仓库根目录是**仓库根**（`hua-cheng-blog`），而文章在 `content/posts/`，
+   * 所以「新链接格式 = 相对路径」时它插入的是
+   * `../../public/images/<文章名>_image/图.png` —— Typora 按文件相对路径也能解析到同一处。
+   * 站点只认 `/images/…`，所以先把 `../` 剥掉，后面的 `public/` 规则才能接上。
+   */
+  while (src.startsWith("../")) src = src.slice(3);
 
   // `public/` 是 Next 的静态目录，也就是站点的根
   if (src.startsWith("/public/")) src = src.slice("/public".length);

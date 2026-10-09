@@ -15,7 +15,7 @@
 | 是什么 | 个人博客，纯静态（构建期生成 HTML，运行期没有 Node） |
 | 栈 | Next.js 16 App Router · React 19 · TypeScript 5 · Tailwind CSS 4 · MDX · TinaCMS 3 |
 | 内容在哪 | `content/posts/*.md(x)`（frontmatter + 正文），**这是唯一的内容真相来源**。`.md` 与 `.mdx` **等价**，都走 MDX 管线 |
-| 静态资源 | `public/images/`（文章配图）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/emojis/`（评论区表情包）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
+| 静态资源 | `public/images/<文章名>_image/`（文章配图，每篇一个文件夹）· `public/wallpapers/`（壁纸）· `public/music/`（音频）· `public/lyrics/`（歌词）· `public/emojis/`（评论区表情包）· `public/uploads/`（上传落点）—— 约定在 `src/lib/assets.ts` |
 | 公开留言/评论 | 走 **Giscus**（GitHub Discussions，配置在 `site-settings.json` 的 `giscus`）；`content/guestbook.json` + `comments.json` 只在**没配 Giscus** 时作为本机兜底 |
 | 站点配置 | `content/site-settings.json`（默认设置）+ `src/lib/site.ts`（站点常量） |
 | 浏览量后端 | `functions/api/[[route]].js`（Pages Function + D1，同源 `/api`，**跟站点一起部署**；见 `functions/README.md`） |
@@ -701,13 +701,32 @@ draft: false
 
 ### 给文章加封面 / 正文配图
 
+图片放在**文章自己的图库**里（Obsidian 粘贴时会自动建这个文件夹）：
+
+```
+public/images/<文章名>_image/图.png
+```
+
+文章里用**相对路径**引用 —— 这样 Obsidian / Typora 打开 `content/posts/xxx.md` 时能直接看到图，
+站点则由 `resolveImageSrc()` 规整成 `/images/…` 取用：
+
 | 想要的效果 | 怎么写 |
 | --- | --- |
-| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: /images/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
-| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](/images/a.jpg)` 或 `<img src="/images/a.jpg" />` |
+| 列表页卡片用某张图当**背景**、文章页顶部也显示它 | frontmatter 写 `cover: ../../public/images/xxx_image/x.jpg`（后台写作时用 TinaCMS 的「封面图」字段） |
+| 卡片底部显示正文里的图片缩略图带 | 正文里正常插图：`![说明](../../public/images/xxx_image/a.jpg)` 或 `<img src="../../public/images/xxx_image/a.jpg" />` |
 
-`extractImages()` 会自动跳过代码块/行内代码里的图片、`data:` 内联图和相对路径，
-最多取 4 张。**有 `cover` 时不再显示缩略图带**（有意的，见硬约束 11）。
+也可以直接写 `/images/xxx_image/a.jpg`（站点能显示，但**编辑器里看不到**）。
+
+**不需要任何同步步骤**：Obsidian 的仓库根目录就是仓库根，附件插件按
+`public/images/${filename}_image` 直接写进 `public/` —— 图只有一份，站点就能取。
+
+`extractImages()` 会自动跳过代码块/行内代码里的图片和 `data:` 内联图，最多取 4 张。
+**有 `cover` 时不再显示缩略图带**（有意的，见硬约束 11）。
+
+⚠️ **Obsidian 的仓库根必须是仓库根（`hua-cheng-blog`），不能是 `content/posts`** ——
+插件只能写仓库内的文件，仓库开在 `content/posts` 时它写不进 `public/`。
+另外务必在「文件与链接 → 排除的文件」里排除 `node_modules/`、`out/`、`.next/` 等，
+否则它会去索引 9 万多个依赖文件，明显变卡。
 
 ### 改互动（浏览量 / 点赞 / 评论）的行为
 
