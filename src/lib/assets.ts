@@ -7,12 +7,22 @@
  *
  * | 目录 | 放什么 | 怎么引用 |
  * | --- | --- | --- |
- * | `public/images/` | 文章正文配图、封面图 | `![说明](/images/x.jpg)`、`cover: /images/x.jpg` |
+ * | `public/images/<文章名>_image/` | 文章配图（**每篇一个文件夹**，Obsidian 也是这么写的） | 编辑器里写 `../../public/images/<文章名>_image/x.jpg`（站点上就是 `/images/<文章名>_image/x.jpg`） |
  * | `public/wallpapers/` | 站点壁纸大图 | 设置面板里填 `/wallpapers/x.jpg` |
  * | `public/music/` | 音频（mp3 / wav / flac …） | `musicUrl("x.mp3")`、`<AudioPlayer src="/music/x.mp3" />` |
  * | `public/lyrics/` | 歌词（`.lrc`） | `src/lib/music.ts` 里给曲目填 `lyrics: lyricUrl("x.lrc")` |
  * | `public/emojis/` | 评论区图片表情包（`index.json` 是清单） | `emojiUrl("x.png")` |
  * | `public/uploads/` | TinaCMS 媒体库与「上传到仓库」的落点（混杂区） | `/uploads/x.jpg` |
+ *
+ * 文章配图为什么按文章分文件夹
+ * ----------------------------
+ * Obsidian 的仓库根目录就是**仓库根**，它的附件插件按
+ * `public/images/${filename}_image` 把插图写进每篇文章自己的图库 —— 图片直接落在 `public/` 下，
+ * 也就是站点能取用的地方，**不需要任何同步步骤**。
+ *
+ * 唯一的代价是文章里的路径：笔记在 `content/posts/`，图在 `public/images/`，
+ * 「相对路径」写法会是 `../../public/images/…`（有点长，但 Obsidian 和 Typora 都能解析）。
+ * `resolveImageSrc()` 负责把它规整成站点上的 `/images/…`。
  *
  * ⚠️ `public/uploads/` **不能删**：
  * - `tina/config.ts` 的 `media.mediaRoot` 写的是 `uploads`

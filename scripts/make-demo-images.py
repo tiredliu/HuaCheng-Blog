@@ -6,7 +6,7 @@
 
 想清掉这些示例资源，把下面三样一起删掉即可：
 
-    public/images/demo-*.jpg
+    public/images/*_image/
     content/posts/image-cover-demo.mdx
     content/posts/image-thumbnails-demo.mdx
     scripts/make-demo-images.py
@@ -29,8 +29,13 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # 输出目录：仓库根的 public/images（文章配图与封面都放这里，见 src/lib/assets.ts）
+#
+# Obsidian 的仓库根目录就是仓库根，附件插件按 `public/images/${filename}_image`
+# 把插图写进每篇文章自己的图库，这里跟它保持一致。
 ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "public" / "images"
+IMAGE_ROOT = ROOT / "public" / "images"
+COVER_DIR = IMAGE_ROOT / "image-cover-demo_image"
+THUMB_DIR = IMAGE_ROOT / "image-thumbnails-demo_image"
 
 # 站点调色板：木棉红 / 岭南青是博客的主题色，其余为配套的冷暖色
 PALETTE = [
@@ -176,22 +181,25 @@ def make_body_image(index: int, name: str, width: int = 1200, height: int = 800)
 
 
 def main() -> int:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    COVER_DIR.mkdir(parents=True, exist_ok=True)
+    THUMB_DIR.mkdir(parents=True, exist_ok=True)
 
-    targets: list[tuple[str, Image.Image]] = [("demo-cover.jpg", make_cover())]
-    for index in range(5):
-        name = f"demo-0{index + 1}.jpg"
-        targets.append((name, make_body_image(index, name)))
-
-    total = 0
-    for name, image in targets:
-        path = OUT_DIR / name
+    def save(directory: Path, name: str, image: Image.Image) -> int:
+        path = directory / name
         image.save(path, "JPEG", quality=82, optimize=True, progressive=True)
         size = path.stat().st_size
-        total += size
-        print(f"  {name}  {image.width}×{image.height}  {size / 1024:.0f}KB")
+        print(f"  {directory.name}/{name}  {image.width}×{image.height}  {size / 1024:.0f}KB")
+        return size
 
-    print(f"\n共 {len(targets)} 张，{total / 1024:.0f}KB → {OUT_DIR}")
+    # demo-cover 只有《图片与封面自检》那篇用；demo-01~05 两篇共用，各放一份
+    total = save(COVER_DIR, "demo-cover.jpg", make_cover())
+    for index in range(5):
+        name = f"demo-0{index + 1}.jpg"
+        body = make_body_image(index, name)
+        total += save(COVER_DIR, name, body)
+        total += save(THUMB_DIR, name, body)
+
+    print(f"\n共 11 张，{total / 1024:.0f}KB → {IMAGE_ROOT}")
     return 0
 
 

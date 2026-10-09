@@ -5,168 +5,167 @@ tags: [MDX, Shiki, KaTeX, 内容工程]
 summary: 给静态博客补上两块最常被抱怨的能力：代码块高亮与 LaTeX 公式。重点在于怎么和深浅色主题、静态导出配合好。
 author: 花城
 ---
-
+ 
 ## 为什么要做这两件事
-
+ 
 技术博客缺了代码高亮，读起来就像看一张没上色的线稿；缺了公式，算法和统计类的文章基本写不了。
-
+ 
 之前一直拖着，是因为担心两件事：
-
+ 
 - **高亮**要不要引入一份很重的运行时？静态站点加载一个几百 KB 的着色器，代价太大
 - **公式**的字体文件会不会拖慢首屏？KaTeX 的字体加起来有 1MB 量级
-
+ 
 最后的答案是：**高亮在构建期做完，公式的字体按需加载**。下面分别说。
-
+ 
 ## 代码高亮：构建期出结果，运行期零成本
-
+ 
 用的是 [Shiki](https://shiki.style)，它在**构建期**就把代码块渲染成了带颜色的 HTML：
-
-```text
+ 
+```
 content/posts/*.mdx
-      ↓ remark-mdx / mdast
-      ↓ @shikijs/rehype        ← 在这里上色
+	  ↓ remark-mdx / mdast
+	  ↓ @shikijs/rehype        ← 在这里上色
    out/posts/xxx/index.html    ← 已经带颜色了
 ```
-
+ 
 也就是说：**访客的浏览器里没有任何高亮代码**，只有现成的 HTML 和 CSS 变量。
-
+ 
 ### 双主题：一份 HTML 同时支持深浅色
-
+ 
 难点在于站点有深色模式。常见做法是准备两套 HTML，或者切换时重新渲染——
 前者体积翻倍，后者要跑客户端脚本。
-
+ 
 Shiki 的「双主题」给了第三种解法：**同一份 HTML 里带上两组颜色变量**。
-
+ 
 ```html
 <pre class="shiki shiki-themes github-light github-dark"
-     style="--shiki-light:#24292e; --shiki-dark:#e1e4e8;
-            --shiki-light-bg:#fff; --shiki-dark-bg:#24292e">
+	 style="--shiki-light:#24292e; --shiki-dark:#e1e4e8;
+			--shiki-light-bg:#fff; --shiki-dark-bg:#24292e">
 ```
-
+ 
 然后 CSS 按 `.dark` 类名挑一套就行：
-
+ 
 ```css
 .article pre.shiki { background-color: var(--shiki-light-bg); }
 .article pre.shiki span { color: var(--shiki-light); }
-
 .dark .article pre.shiki { background-color: var(--shiki-dark-bg); }
 .dark .article pre.shiki span { color: var(--shiki-dark); }
 ```
-
+ 
 切换主题时**没有任何重新渲染**，只是 CSS 变量换了取值。
-
+ 
 <Callout type="tip" title="关键配置">
 `@shikijs/rehype` 一定要配 `defaultColor: false`。默认情况下它会写死一个 `color`
 内联样式，那个样式的优先级高过 CSS 变量，双主题就失效了。
 </Callout>
-
+ 
 ### 语言标签怎么来的
-
+ 
 代码块右上角那个 `TSX` 标签，看着简单，其实没法用纯 CSS 做：
 Shiki 把语言写在 `<code class="language-tsx">` 上，
 而 CSS 的 `attr()` **只能读属性值，读不到类名**。
-
+ 
 所以要在 MDX 组件层把类名读出来，渲染成真正的元素：
-
+ 
 ```tsx
 function MdxPre({ children, ...rest }: React.ComponentPropsWithoutRef<"pre">) {
   const child = Array.isArray(children) ? children[0] : children;
   const className = isValidElement(child) ? child.props.className ?? "" : "";
   const language = /language-([\w+#-]+)/.exec(className)?.[1];
-
   return (
-    <div className="code-block">
-      {language && <span className="code-lang">{language}</span>}
-      <pre {...rest}>{children}</pre>
-    </div>
+	<div className="code-block">
+	  {language && <span className="code-lang">{language}</span>}
+	  <pre {...rest}>{children}</pre>
+	</div>
   );
 }
 ```
-
+ 
 ## 数学公式：字体按需下载
-
+ 
 公式用 [KaTeX](https://katex.org/)，链路是在 remark 阶段识别、rehype 阶段渲染：
-
+ 
 ```ts
 remarkPlugins: ["remark-math"],
 rehypePlugins: [["rehype-katex", { output: "html", throwOnError: false }]],
 ```
-
+ 
 写法就是标准的 LaTeX。行内用单个 `$`：
-
-质能方程 $E = mc^2$ 就是这么写出来的。
-
+ 
+质能方程 $E \= mc^2$ 就是这么写出来的。
+ 
 行间用两个 `$$`：
-
+ 
 $$
-\int_{-\infty}^{\infty} e^{-x^2}\,\mathrm{d}x = \sqrt{\pi}
+\int\_{-\infty}^{\infty} e^{-x^2},\mathrm{d}x \= \sqrt{\pi}
 $$
-
+ 
 再比如一个稍微复杂点的——高斯分布的概率密度函数：
-
+ 
 $$
-f(x \mid \mu, \sigma^2) = \frac{1}{\sqrt{2\pi\sigma^2}}
+f(x \mid \mu, \sigma^2) \= \frac{1}{\sqrt{2\pi\sigma^2}}
 \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
 $$
-
+ 
 ### 字体是怎么按需加载的
-
+ 
 KaTeX 的字体包不小：**60 个文件、约 1MB**。但真正进构建产物的只有 woff2 子集
 （20 个 / 254KB），而且**浏览器只会下载页面里真正用到的那些字形**。
-
+ 
 所以「全局引入 KaTeX CSS」的实际代价只有样式本身：
-
-| | 之前 | 之后 |
-| --- | ---: | ---: |
-| 构建产物 CSS | 约 52KB | 约 86KB |
-| 其中 KaTeX 样式 | — | 24KB |
-| 字体（按需下载） | — | 最多 254KB，实际远小于此 |
-
+ 
+|             |     之前 |              之后 |
+| ----------- | -----: | --------------: |
+| 构建产物 CSS    | 约 52KB |          约 86KB |
+| 其中 KaTeX 样式 |      — |            24KB |
+| 字体（按需下载）    |      — | 最多 254KB，实际远小于此 |
+ 
 拿我自己的站点验证：一篇没写公式的文章，Network 面板里的 Font 请求数是 **0**。
-
+ 
 <Callout type="info" title="想自己验证">
 打开开发者工具 → Network → 筛选 `Font`，对比一篇有公式的文章和一篇没有公式的文章。
 </Callout>
-
+ 
 ### 写错了会怎样
-
+ 
 `rehype-katex` 配了 `throwOnError: false`，所以公式写错**不会让整篇构建失败**，
 而是把错误渲染在页面上——这样更容易发现，也更容易修。
-
+ 
 比如故意写错一个命令：$\frac{1}{$ 会被标红提示，而不是静默变成空白。
-
+ 
 ## 和「静态导出」的配合
-
+ 
 这两件事都踩在同一个原则上：**能在构建期做完的，就不要留到运行期。**
-
-| 能力 | 谁在做 | 运行期成本 |
-| --- | --- | --- |
-| 代码高亮 | Shiki（构建期） | 0 —— 只有内联的颜色变量 |
+ 
+| 能力   | 谁在做        | 运行期成本             |
+| ---- | ---------- | ----------------- |
+| 代码高亮 | Shiki（构建期） | 0 —— 只有内联的颜色变量    |
 | 公式渲染 | KaTeX（构建期） | 0 —— 只有 CSS 与按需字体 |
-| 主题切换 | CSS 变量 | 0 —— 改个类名 |
-
+| 主题切换 | CSS 变量     | 0 —— 改个类名         |
+ 
 代价都转移到了构建期：整站构建从约 3 秒变成约 15 秒。
 对一天构建不了几次的博客来说，这笔账很划算。
-
+ 
 ## 一个顺带发现的坑
-
+ 
 折腾图片的时候发现 `next/image` 在静态导出下有个**很隐蔽的失败方式**。
-
+ 
 `output: "export"` 没有服务端，而 `next/image` 的默认优化器**就是一个服务端端点**。
 如果不管它，构建会**成功**，但产出的 HTML 是：
-
+ 
 ```html
 <img src="/_next/image/?url=%2Fuploads%2Fx.png&w=256&q=75" />
 ```
-
+ 
 而 `out/` 里根本没有 `_next/image` 这个路径 —— 结果是**构建不报错，线上所有图片 404**。
-
+ 
 所以 `next.config.ts` 里那行 `images: { unoptimized: true }` 是不能删的。
 MDX 正文里的图片走的是自己覆写的原生 `<img>`，不受这条影响。
-
+ 
 ## 小结
-
+ 
 - 高亮和公式都放在**构建期**完成，运行期只剩 CSS
 - 双主题靠 **CSS 变量**，切换时零开销
 - 组件层能做 CSS 做不到的事（比如从类名里取语言名）
-- 静态站点最容易踩的坑，是**「构建成功但运行期坏掉」**这类静默失败
+- 静态站点最容易踩的坑，是\*\*「构建成功但运行期坏掉」\*\*这类静默失败
+ 

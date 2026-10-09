@@ -56,7 +56,11 @@ next-env.d.ts
 # Obsidian 会把 .obsidian/ 建在「仓库」根目录 —— 如果把仓库开在 content/posts，
 # 这个目录就会出现在内容目录里，属于纯噪音，不进版本库。
 .obsidian/
+.obsidianignore
 .trash/
 
 # AI 工作区（会话记忆、预览页、临时脚本与备份），不属于项目源码
 /.workbuddy/
+
+# 个人 Obsidian 笔记库（MyNote），不属于博客项目，别提交
+/MyNote/
