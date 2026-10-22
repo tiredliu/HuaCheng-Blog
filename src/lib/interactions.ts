@@ -10,14 +10,26 @@
  * | provider   | 数字从哪来                             | 需要部署什么 |
  * | ---------- | -------------------------------------- | ------------ |
  * | `"local"`  | 只统计本机浏览器（默认，零配置）        | 什么都不用   |
- * | `"remote"` | 调用 `apiBase` 上的互动服务（全局计数） | Cloudflare Worker，见 workers/blog-api |
+ * | `"remote"` | 调用 `apiBase` 上的互动服务（全局计数） | Cloudflare Pages Function + D1 |
+ *
+ * ⚠️ **部署方（Pages Function）实际只实现了两个路由**（见 `functions/api/[[route]].js`）：
+ *
+ *   GET  /stats?path=…     读浏览量
+ *   POST /hit  { path }    浏览量 +1（D1 原子自增）
+ *
+ * 下面的 `/comments`、`/like` 是**早先那版 Worker（`workers/blog-api`）**留下的接口，
+ * 本站已弃用：评论与点赞现在都走 **Giscus**（GitHub Discussions），计数在 GitHub 侧。
+ * 所以**不要再对着 `/api` 调 `/comments`** —— 那只会拿回一个 404；
+ * `useCommentThread` 的 `enabled` 开关就是为此而设（配了 Giscus 时传 `false`）。
  *
  * 为什么不是「第三方现成计数器」：不蒜子一类免费公众计数器都是个人在维护，
  * 已经出现过整站 502 的情况（见 README）。真正「不会倒闭」的只有自己
  * 托管在大厂 serverless 上的一小段代码 —— 本站已经部署在 Cloudflare Pages，
- * 所以 Worker + KV 是唯一同时满足「免费、不倒闭、国内可访问、无需常驻服务」的方案。
+ * 所以 Pages Function + D1 是同时满足「免费、不倒闭、国内可访问、无需常驻服务」的方案。
+ * （早先用的是 Workers KV，但 KV 免费版每天只有 1000 次写、且没有事务，
+ * 并发下会丢计数、一上量就 500，已换掉。）
  *
- * `remote` 不可用时（没部署、网络失败、被墙）自动退化成本机计数，
+ * `remote` 不可用时（没绑定 D1、网络失败、被墙）自动退化成本机计数，
  * 界面上会如实标注数字来源。
  * ---------------------------------------------------------------------------
  */
@@ -263,7 +275,7 @@ export function readLocalLikes(): Record<string, boolean> {
 }
 
 /* ------------------------------------------------------------------ */
-/* 远程互动服务（Cloudflare Worker，见 workers/blog-api）               */
+/* 远程互动服务（Pages Function + D1，见 functions/api/[[route]].js）    */
 /* ------------------------------------------------------------------ */
 
 /** 服务地址：结尾斜杠统一去掉，避免拼出 `//stats` */
@@ -488,7 +500,14 @@ export async function toggleLike(
   };
 }
 
-/** 拉取评论（不含本机评论，调用方自己 merge） */
+/**
+ * 拉取评论（不含本机评论，调用方自己 merge）
+ *
+ * ⚠️ **仅「没配 Giscus」的本机评论兜底路径会用到，且 `apiBase` 指向的后端
+ * 必须真的是老版 `workers/blog-api`** —— 本站部署的 Pages Function
+ * 没有 `/comments` 路由，调它只会拿回 404（配了 Giscus 时请通过
+ * `useCommentThread({ enabled: false })` 把请求整个掐掉）。
+ */
 export async function fetchRemoteComments(
   path: string,
   settings: InteractionSettings,
@@ -508,6 +527,9 @@ export async function fetchRemoteComments(
  * `githubToken` 只在站长的浏览器里存在（和写文章用的是同一个凭据），
  * 只有带上它服务端才会接受 `reply` / `owner` / 删除 —— 这就是
  * 「访客能发言、回复只有站长能做」的强制点。
+ *
+ * ⚠️ 和 `fetchRemoteComments` 一样，**只有老版 `workers/blog-api` 才有这个接口**；
+ * 本站的 Pages Function 不提供 `/comments`（评论走 Giscus）。
  */
 export interface CommentMutation {
   comment?: CommentItem;

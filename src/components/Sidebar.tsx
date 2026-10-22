@@ -95,12 +95,12 @@ export function Sidebar({
     <aside
       style={isDesktop ? { width: isOpen ? width : 0 } : undefined}
       className={cn(
-        "flex shrink-0 flex-col overflow-hidden border-stone-200 transition-all duration-300 ease-out dark:border-stone-800",
+        "flex shrink-0 flex-col overflow-hidden transition-all duration-300 ease-out hc-glass-edge",
         frosted
           ? "bg-white/62 backdrop-blur-xl dark:bg-stone-900/58"
-          : "bg-white dark:bg-stone-900",
+          : "bg-white/95 backdrop-blur-md dark:bg-stone-900/92",
         isDesktop
-          ? "relative border-r"
+          ? "relative z-10 border-r"
           : "fixed inset-y-0 left-0 z-50 w-[84vw] max-w-[320px] border-r shadow-float",
         isDesktop
           ? undefined
@@ -147,7 +147,7 @@ export function Sidebar({
           {/* 后台写作入口：对应「网页后台直接写作」的核心需求 */}
           <Link
             href="/admin/index.html"
-            className="mb-3 flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-2.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+            className="hc-glow-hover mb-3 flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-2.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
           >
             <SquarePen className="h-4 w-4" />
             写文章（TinaCMS 后台）
@@ -166,7 +166,7 @@ export function Sidebar({
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                     active
-                      ? "bg-brand-50 font-medium text-brand-700 dark:bg-brand-950/50 dark:text-brand-300"
+                      ? "hc-nav-active font-medium"
                       : "text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800",
                   )}
                 >

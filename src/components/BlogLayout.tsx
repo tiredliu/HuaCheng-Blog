@@ -314,6 +314,11 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
         fallbackUrl={activeUpload?.fallbackUrl}
       />
 
+      {/* 无壁纸时铺一层双色渐变光晕，让底色有层次（与壁纸互斥渲染，不打架） */}
+      {!wallpaperActive && (
+        <div className="aurora-layer pointer-events-none fixed inset-0 -z-10" aria-hidden />
+      )}
+
       <MouseCursorEffect enabled={cursorEffect} color={cursorColor} codeColor={codeColor} />
 
       <a
@@ -325,11 +330,9 @@ export function BlogLayout({ children, recentPosts, stats, siteSettings, repoMes
 
       <div
         className={cn(
-          "flex h-full flex-col overflow-hidden border-stone-200 sm:rounded-2xl sm:border sm:shadow-card dark:border-stone-800",
-          // 有壁纸时外壳变毛玻璃，让壁纸透出来
-          wallpaperActive
-            ? "bg-stone-50/72 backdrop-blur-2xl dark:bg-stone-900/68"
-            : "bg-stone-50 dark:bg-stone-900",
+          // 无论有无壁纸都走玻璃基调 + 发光描边；光晕层在 -z-10，透过半透明外壳透出来
+          "flex h-full flex-col overflow-hidden bg-stone-50/70 backdrop-blur-xl sm:rounded-2xl sm:border hc-glass-edge dark:bg-stone-900/65",
+          wallpaperActive && "bg-stone-50/72 dark:bg-stone-900/68",
         )}
       >
         <TopBar

@@ -80,6 +80,10 @@ export function MessagePanel({
     settings,
     localComments: localMessages,
     setLocalComments: setLocalMessages,
+    // ⚠️ 配了 Giscus 时本机留言通道根本不渲染（下面三个分支走的都是 Giscus），
+    // 而互动服务并没有 `/comments` 接口 —— 再发请求只会让每个页面白挨一次 404。
+    // 这个组件挂在每一页上，所以这一行直接决定了整站的请求噪音。
+    enabled: !giscus,
   });
 
   const likeCount = useMemo(
