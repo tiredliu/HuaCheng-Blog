@@ -53,7 +53,7 @@ function IconButton({
       className={cn(
         "grid h-9 w-9 place-items-center rounded-lg transition-colors",
         active
-          ? "bg-brand-50 text-brand-600 dark:bg-brand-950/60 dark:text-brand-300"
+          ? "hc-icon-active"
           : "text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100",
         className,
       )}
@@ -81,10 +81,10 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "flex h-14 shrink-0 items-center gap-2 border-b border-stone-200 px-3 dark:border-stone-800",
+        "relative z-10 flex h-14 shrink-0 items-center gap-2 px-3 hc-glass-edge",
         frosted
-          ? "bg-white/60 backdrop-blur-xl dark:bg-stone-900/55"
-          : "bg-white/85 backdrop-blur-md dark:bg-stone-900/85",
+          ? "bg-white/55 backdrop-blur-xl dark:bg-stone-900/50"
+          : "bg-white/80 backdrop-blur-md dark:bg-stone-900/80",
       )}
     >
       {/* 左上角：隐藏 / 显示左侧导航 */}

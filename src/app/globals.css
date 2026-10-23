@@ -330,3 +330,96 @@ html[data-cursor-fx="on"] [contenteditable] * {
   @apply rounded bg-amber-50 px-1 font-mono text-[0.9em] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300;
 }
 
+/* ------------------------------------------------------------------ */
+/* 玻璃拟态 / 渐变光晕 / 发光描边（灵客Ai 风格升级，纯 CSS 零依赖）     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 背景光晕层：无壁纸时铺在 body 底色之上，用品牌双色（木棉红 + 岭南青）
+ * 的径向渐变营造层次感，避免深色背景死黑、浅色背景寡淡。
+ * 与 WallpaperLayer 平级（都 fixed -z-10），由 BlogLayout 按 wallpaperActive
+ * 互斥渲染，所以不会和写实壁图打架。
+ */
+.aurora-layer {
+  /* 浅色：克制，仅微微提亮角落 */
+  background-image:
+    radial-gradient(46rem 34rem at 12% -10%, color-mix(in oklab, var(--color-brand-400) 11%, transparent), transparent 60%),
+    radial-gradient(40rem 32rem at 100% 2%, color-mix(in oklab, var(--color-jade-400) 9%, transparent), transparent 58%),
+    radial-gradient(38rem 38rem at 50% 120%, color-mix(in oklab, var(--color-brand-500) 7%, transparent), transparent 60%);
+}
+
+.dark .aurora-layer {
+  /* 深色：明显的彩色光晕，这是「高级感」的主来源 */
+  background-image:
+    radial-gradient(46rem 34rem at 12% -10%, color-mix(in oklab, var(--color-brand-500) 22%, transparent), transparent 60%),
+    radial-gradient(40rem 32rem at 100% 2%, color-mix(in oklab, var(--color-jade-500) 17%, transparent), transparent 58%),
+    radial-gradient(38rem 38rem at 50% 120%, color-mix(in oklab, var(--color-brand-600) 14%, transparent), transparent 60%);
+}
+
+/* 玻璃面板的发光描边：1px 半透白边 + 内侧高光，深色下更出彩 */
+.hc-glass-edge {
+  border: 1px solid color-mix(in oklab, white 12%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 16%, transparent),
+    0 1px 2px rgb(24 24 27 / 0.04),
+    0 12px 40px -16px rgb(24 24 27 / 0.28);
+}
+
+.dark .hc-glass-edge {
+  border-color: color-mix(in oklab, white 9%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 9%, transparent),
+    0 18px 50px -24px rgb(0 0 0 / 0.7);
+}
+
+/* 卡片 hover：品牌色描边 + 同色外发光，取代单调阴影 */
+.hc-glow-hover {
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+}
+
+.hc-glow-hover:hover {
+  border-color: color-mix(in oklab, var(--color-brand-500) 45%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--color-brand-500) 35%, transparent),
+    0 10px 36px -12px color-mix(in oklab, var(--color-brand-500) 45%, transparent);
+}
+
+/* 品牌渐变文字（logo、标题点缀） */
+.hc-gradient-text {
+  background-image: linear-gradient(120deg, var(--color-brand-500), var(--color-jade-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 导航激活项：双色渐变底 + 左侧品牌色描边发光 */
+.hc-nav-active {
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in oklab, var(--color-brand-500) 16%, transparent),
+    color-mix(in oklab, var(--color-jade-500) 12%, transparent)
+  );
+  color: var(--color-brand-700);
+  box-shadow: inset 3px 0 0 0 var(--color-brand-500);
+}
+
+.dark .hc-nav-active {
+  color: var(--color-brand-300);
+  box-shadow:
+    inset 3px 0 0 0 var(--color-jade-400),
+    0 0 18px -6px color-mix(in oklab, var(--color-brand-500) 60%, transparent);
+}
+
+/* 图标按钮激活态：品牌色描边微发光 */
+.hc-icon-active {
+  background-color: color-mix(in oklab, var(--color-brand-500) 12%, transparent);
+  color: var(--color-brand-600);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-brand-500) 35%, transparent);
+}
+
+.dark .hc-icon-active {
+  background-color: color-mix(in oklab, var(--color-brand-400) 16%, transparent);
+  color: var(--color-brand-300);
+  box-shadow: 0 0 14px -4px color-mix(in oklab, var(--color-brand-500) 55%, transparent);
+}
+

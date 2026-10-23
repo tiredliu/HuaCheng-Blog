@@ -41,10 +41,10 @@ export function PostCard({ post, featured = false, className, fromHref }: PostCa
   return (
     <article
       className={cn(
-        "group animate-fade-up relative overflow-hidden rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-float",
+        "group animate-fade-up relative overflow-hidden rounded-2xl border transition-all duration-200 hover:-translate-y-0.5",
         hasCover
           ? "border-stone-800/60 dark:border-stone-700"
-          : "border-stone-200 bg-white hover:border-brand-200 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-brand-800/70",
+          : "hc-glow-hover border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900",
         className,
       )}
     >

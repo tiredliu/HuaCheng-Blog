@@ -31,6 +31,14 @@ export interface CommentThreadOptions {
   /** 只存在这台浏览器里的评论 */
   localComments: CommentItem[];
   setLocalComments: (updater: (prev: CommentItem[]) => CommentItem[]) => void;
+  /**
+   * 是否为本机评论这条通道拉取远程数据（默认 `true`）。
+   *
+   * ⚠️ **配了 Giscus 时必须传 `false`**：那时评论区与留言板整块都走 Giscus，
+   * 本机评论根本不渲染，而互动服务的 `/comments` 接口（Pages Function）
+   * **并没有实现** —— 照样发请求只会让每个页面白挨一次 404。
+   */
+  enabled?: boolean;
 }
 
 export interface CommentThreadNotice {
@@ -62,12 +70,15 @@ export interface CommentThreadState {
  * | 来源 | 谁能写 | 谁看得见 |
  * | --- | --- | --- |
  * | 仓库文件（`content/guestbook.json` / `comments.json`） | 站长（GitHub Token） | 所有人 |
- * | 互动服务（Cloudflare Worker + KV） | 访客可发表；回复/删除需要站长凭据 | 所有人 |
+ * | 互动服务（Pages Function，只有老版 workers/blog-api 才有 `/comments`） | 访客可发表；回复/删除需要站长凭据 | 所有人 |
  * | 本机 `localStorage` | 任何人 | 只有自己 |
  *
  * 「**访客能发言、回复只有站长能做**」这条规则在两个后端上都是强制的：
- * Worker 会拿 token 去 GitHub 校验 `permissions.push`，
+ * 后端会拿 token 去 GitHub 校验 `permissions.push`，
  * 而写仓库文件本来就必须有仓库写权限。前端只是把入口显示出来而已。
+ *
+ * ⚠️ **配了 Giscus（本站默认）时整条本机通道都不渲染**，调用方要传
+ * `enabled: false`，否则这里会在每个页面加载时白挨一次 `/comments` 404。
  */
 export function useCommentThread({
   target,
@@ -76,6 +87,7 @@ export function useCommentThread({
   settings,
   localComments,
   setLocalComments,
+  enabled = true,
 }: CommentThreadOptions): CommentThreadState {
   const { config, isOwner } = useOwnerMode();
 
@@ -97,9 +109,9 @@ export function useCommentThread({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<CommentThreadNotice | null>(null);
 
-  // 远程模式下把服务端已有的评论拉下来（本机模式不会发任何请求）
+  // 远程模式下把服务端已有的评论拉下来（本机模式、或本机通道根本没渲染时都不会发任何请求）
   useEffect(() => {
-    if (!remoteReady) return;
+    if (!enabled || !remoteReady) return;
     let cancelled = false;
 
     void fetchRemoteComments(pathKey, connection).then((list) => {
@@ -109,7 +121,7 @@ export function useCommentThread({
     return () => {
       cancelled = true;
     };
-  }, [connection, pathKey, remoteReady]);
+  }, [connection, enabled, pathKey, remoteReady]);
 
   const comments = useMemo(() => {
     const serverSide = [...repoComments, ...(remoteComments ?? [])];
